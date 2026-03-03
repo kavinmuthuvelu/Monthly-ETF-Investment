@@ -217,7 +217,8 @@ const PORTFOLIO = [
    color:"#81C784",
    icon:"🚀",
    dhanMFUrl:"https://dhan.co/mutual-funds/uti-nifty-midsmallcap-400-momentum-quality-100-index-fund-direct-growth/",
-   amc:"UTI Mutual Fund"},
+   amc:"UTI Mutual Fund",
+   mfSchemeCode:151186},          // AMFI scheme code for UTI MQ100 Direct Growth
 
   {id:"ppfcf",
    category:"Flexi Cap",
@@ -229,7 +230,8 @@ const PORTFOLIO = [
    color:"#FFB74D",
    icon:"⚙️",
    dhanMFUrl:"https://dhan.co/mutual-funds/parag-parikh-flexi-cap-fund-direct-growth/",
-   amc:"PPFAS Mutual Fund"},
+   amc:"PPFAS Mutual Fund",
+   mfSchemeCode:122639},
 
   {id:"mon100",
    category:"Global Tech",
@@ -706,61 +708,72 @@ function deleteMFHolding(isin){
 }
 
 async function fetchAMFINavs(){
-  const isins=MF_PORTFOLIO.map(p=>p.isin);
-  if(!isins.length) return;
+  if(!MF_PORTFOLIO.length) return;
   S.mfNavLoading=true; S.mfNavError=null;
   if(S.tab==="portfolio") render();
 
-  // Try direct mfapi.in first (public CORS-friendly API, no proxy needed)
-  // mfapi.in: search by ISIN → get schemeCode → fetch NAV
+  // Strategy:
+  //   1. If mfSchemeCode is set → fetch directly from mfapi.in (fastest, no search)
+  //   2. If mfSearchQuery is set → search mfapi.in by name, pick Direct+Growth result
+  //   3. Fallback: search by ISIN string (least reliable, kept as last resort)
   const results={};
-  try{
-    await Promise.all(MF_PORTFOLIO.map(async p=>{
-      try{
-        // Step 1: search for scheme by ISIN
-        const sr=await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(p.isin)}`,
-          {signal:AbortSignal.timeout(6000)});
-        if(!sr.ok) throw new Error("Search HTTP "+sr.status);
-        const schemes=await sr.json();
-        if(!schemes||!schemes.length) throw new Error("No scheme found for "+p.isin);
-        const schemeCode=schemes[0].schemeCode;
 
-        // Step 2: fetch NAV for that scheme code
-        const nr=await fetch(`https://api.mfapi.in/mf/${schemeCode}`,
-          {signal:AbortSignal.timeout(6000)});
-        if(!nr.ok) throw new Error("NAV HTTP "+nr.status);
-        const nd=await nr.json();
-        const latestNav=parseFloat(nd?.data?.[0]?.nav);
-        const navDate=nd?.data?.[0]?.date||"";
-        if(!latestNav||isNaN(latestNav)) throw new Error("Bad NAV value");
-        results[p.isin]={nav:latestNav, date:navDate, schemeName:nd.meta?.scheme_name||p.instrument, schemeCode};
-      } catch(e){
-        console.warn("mfapi.in failed for",p.ticker,"→",e.message);
-        // Fallback: try proxy /amfi-nav if proxy is active
-        if(S.proxyActive){
-          const base=S.proxyUrl.replace(/\/+$/,"");
-          const r=await fetch(`${base}/amfi-nav?isins=${encodeURIComponent(p.isin)}`).catch(()=>null);
-          if(r?.ok){
-            const d=await r.json().catch(()=>({}));
-            if(d[p.isin]?.nav) results[p.isin]=d[p.isin];
-          }
-        }
-      }
-    }));
-    const found=Object.keys(results).length;
-    if(found){
-      S.mfNavs={...S.mfNavs,...results};
-      showToast(`NAV updated: ${Object.entries(results).map(([isin,v])=>{
-        const p=MF_PORTFOLIO.find(x=>x.isin===isin);
-        return (p?.ticker||isin.slice(-4))+" ₹"+v.nav.toFixed(2);
-      }).join(", ")} ✓`);
-    } else {
-      throw new Error("No NAVs could be fetched");
-    }
-  } catch(e){
-    S.mfNavError=e.message;
-    showToast("NAV fetch failed: "+e.message,"error");
+  async function fetchBySchemeCode(schemeCode, p){
+    const r=await fetch(`https://api.mfapi.in/mf/${schemeCode}`,
+      {signal:AbortSignal.timeout(8000)});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const d=await r.json();
+    const latestNav=parseFloat(d?.data?.[0]?.nav);
+    const navDate=d?.data?.[0]?.date||"";
+    if(!latestNav||isNaN(latestNav)) throw new Error("Bad NAV in response");
+    results[p.isin]={nav:latestNav, date:navDate,
+      schemeName:d.meta?.scheme_name||p.instrument, schemeCode};
   }
+
+  async function searchAndFetch(query, p){
+    const sr=await fetch(
+      `https://api.mfapi.in/mf/search?q=${encodeURIComponent(query)}`,
+      {signal:AbortSignal.timeout(8000)});
+    if(!sr.ok) throw new Error("Search HTTP "+sr.status);
+    const schemes=await sr.json();
+    if(!schemes||!schemes.length) throw new Error("No results for: "+query);
+    // Prefer scheme whose name contains both "Direct" and "Growth"
+    const match = schemes.find(s=>{
+      const n=(s.schemeName||"").toLowerCase();
+      return n.includes("direct")&&(n.includes("growth")||n.includes("gr"));
+    }) || schemes[0];
+    await fetchBySchemeCode(match.schemeCode, p);
+  }
+
+  await Promise.all(MF_PORTFOLIO.map(async p=>{
+    try{
+      if(p.mfSchemeCode){
+        // Fastest path: known scheme code
+        await fetchBySchemeCode(p.mfSchemeCode, p);
+      } else if(p.mfSearchQuery){
+        // Search by curated name query
+        await searchAndFetch(p.mfSearchQuery, p);
+      } else {
+        // Last resort: search by ISIN
+        await searchAndFetch(p.isin, p);
+      }
+    } catch(e){
+      console.warn("NAV fetch failed for",p.ticker,":",e.message);
+      S.mfNavError=(S.mfNavError?S.mfNavError+"; ":"")+p.ticker+": "+e.message;
+    }
+  }));
+
+  const found=Object.keys(results).length;
+  if(found){
+    S.mfNavs={...S.mfNavs,...results};
+    showToast(`NAV updated: ${Object.entries(results).map(([isin,v])=>{
+      const p=MF_PORTFOLIO.find(x=>x.isin===isin);
+      return (p?.ticker||isin.slice(-4))+" ₹"+v.nav.toFixed(2)+" ("+v.date+")";
+    }).join(" · ")} ✓`);
+  } else if(!S.mfNavError){
+    S.mfNavError="No NAVs fetched — check internet connection";
+  }
+
   S.mfNavLoading=false;
   if(S.tab==="portfolio") render();
 }
@@ -2036,12 +2049,23 @@ function renderPortfolio(){
     }
 
     out+=`<div class="htable-foot">
-      <div style="font-size:12px;font-weight:700;color:#60778A;text-transform:uppercase;letter-spacing:.8px">ETF Total</div>
-      <div></div><div class="hcol3" style="text-align:right"><span class="mono" style="font-size:13px;color:#60778A">${fmtC(inv)}</span></div><div class="hcol4"></div>
-      <div style="text-align:right"><span class="mono" style="font-size:16px;font-weight:700;color:#4FC3F7">${fmtC(cur)}</span></div>
+      <div>
+        <div style="font-size:12px;font-weight:700;color:#D8E3EF;text-transform:uppercase;letter-spacing:.8px">Total Holdings</div>
+        <div style="font-size:10px;color:#40556A;margin-top:3px">ETF + MF</div>
+      </div>
+      <div></div>
+      <div class="hcol3" style="text-align:right">
+        <span class="mono" style="font-size:13px;color:#60778A">${fmtC(grandInv)}</span>
+        <div style="font-size:10px;color:#40556A">invested</div>
+      </div>
+      <div class="hcol4"></div>
       <div style="text-align:right">
-        <div class="mono" style="font-size:14px;font-weight:700;color:${pnlColor(pct)}">${pnl>=0?"+":"−"}${fmtC(Math.abs(pnl))}</div>
-        <span class="badge" style="background:${pnlBg(pct)};border:1px solid ${pnlBorder(pct)};color:${pnlColor(pct)};margin-top:4px">${fmtP(pct)}</span>
+        <span class="mono" style="font-size:16px;font-weight:700;color:#4FC3F7">${fmtC(grandCur)}</span>
+        <div style="font-size:10px;color:#40556A;margin-top:2px">ETF ${fmtC(cur)} + MF ${mfCurS>0?fmtC(mfCurS):"—"}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="mono" style="font-size:14px;font-weight:700;color:${pnlColor(grandPct)}">${grandPnl>=0?"+":"−"}${fmtC(Math.abs(grandPnl))}</div>
+        <span class="badge" style="background:${pnlBg(grandPct)};border:1px solid ${pnlBorder(grandPct)};color:${pnlColor(grandPct)};margin-top:4px">${fmtP(grandPct)}</span>
       </div></div></div>`;
 
     out+=`<div class="sip-banner" style="margin-top:16px">

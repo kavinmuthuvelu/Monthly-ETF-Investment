@@ -1801,113 +1801,135 @@ function renderPortfolio(){
       <div class="htable-hdr"><div>Instrument</div><div style="text-align:right">${S.trackingStartDate?"Tracked":"Qty"}</div>
         <div style="text-align:right" class="hcol3">Avg Cost${S.trackingStartDate?" ✦":""}</div><div style="text-align:right" class="hcol4">LTP</div>
         <div style="text-align:right">Curr. Value</div><div style="text-align:right">P&L${S.trackingStartDate?" ✦":""}</div></div>`;
-    // Render each strategy ETF row (MFs show as "not in equity holdings")
+    // Render each strategy ETF row
     PORTFOLIO.forEach(p=>{
       const isMF = p.type==="MF";
-      // Match by ticker first (same logic as matchHolding), then isin
       const h = S.etfHoldings.find(e=>
         e.ticker===p.ticker ||
         (e.tradingSymbol||"").toUpperCase()===p.ticker.toUpperCase() ||
         (e.isin||"").toUpperCase()===p.isin.toUpperCase()
       );
+
+      // ── Not held / MF placeholder ────────────────────────────────────────
       if(!h){
-        const isLegacy = p.legacy;
+        const isLegacy=p.legacy;
         out+=`<div class="htable-row" style="opacity:${isMF?0.55:0.30}">
-          <div style="display:flex;align-items:center;gap:10px"><span style="font-size:20px">${p.icon}</span>
-            <div><div class="mono" style="font-size:13px;font-weight:700;color:${p.color}">${p.ticker}</div>
-              <div style="font-size:11px;color:#60778A">${p.instrument.slice(0,38)}…</div>
+          <div style="display:flex;align-items:center;gap:10px;padding-left:14px">
+            <span style="font-size:20px">${p.icon}</span>
+            <div>
+              <div class="mono" style="font-size:13px;font-weight:700;color:${p.color}">${p.ticker}</div>
+              <div style="font-size:11px;color:#60778A">${p.instrument.slice(0,38)}</div>
               <span class="badge badge-dim" style="font-size:9px;padding:2px 6px;margin-top:3px">
                 ${isMF?"MF — see section below":isLegacy?"Not in account":"Not yet held"}
               </span>
-            </div></div>
+            </div>
+          </div>
           <div style="text-align:right;color:#40556A">—</div>
           <div style="text-align:right;color:#40556A" class="hcol3">—</div>
           <div style="text-align:right;color:#40556A" class="hcol4">—</div>
           <div style="text-align:right;color:#40556A">—</div>
-          <div style="text-align:right">${isMF
-            ?`<button class="btn btn-amber btn-sm" style="font-size:10px;padding:4px 10px" onclick="window.open('${p.dhanMFUrl||"https://dhan.co/mutual-funds/"}','_blank')">📱 Invest</button>`
-            :`<button class="btn btn-blue btn-sm" style="font-size:10px;padding:4px 10px" onclick="switchTab('execute')">⚡ Buy</button>`}
-          </div></div>`;
-        return;
-      }
-      const pc=pnlColor(h.pnlPct),pb=pnlBg(h.pnlPct),pbr=pnlBorder(h.pnlPct),up=h.ltp>h.avgCostPrice;
-      const isLegacy=p.legacy;
-      const isExpanded = S.expandedTicker===p.ticker;
-      const canExpand  = h.trades&&h.trades.length>0;
-
-      // ETF held but not purchased since tracking date → dim row, zero out, not in totals
-      if(h.notTracked){
-        out+=`<div style="border-bottom:1px solid #0A1520">
-          <div class="htable-row" style="opacity:0.35">
-            <div style="display:flex;align-items:center;gap:10px">
-              <span style="width:10px;flex-shrink:0"></span>
-              <div style="width:36px;height:36px;border-radius:10px;background:${p.color}08;border:1px solid ${p.color}15;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;filter:grayscale(1)">${p.icon}</div>
-              <div style="min-width:0">
-                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                  <div class="mono" style="font-size:13px;font-weight:700;color:#40556A">${p.ticker}</div>
-                  <span class="badge" style="font-size:9px;padding:2px 5px;background:#0a0a0a;border:1px solid #1a1a1a;color:#40556A">not purchased since ${S.trackingStartDate}</span>
-                </div>
-                <div style="font-size:11px;color:#2A3F5C">${fmt(h.heldQty||0)} units held in account · excluded from tracked totals</div>
-              </div>
-            </div>
-            <div style="text-align:right;color:#2A3F5C">—</div>
-            <div style="text-align:right;color:#2A3F5C" class="hcol3">—</div>
-            <div style="text-align:right;color:#2A3F5C" class="hcol4">${fmtC(h.ltp)}</div>
-            <div style="text-align:right;color:#2A3F5C">—</div>
-            <div style="text-align:right;color:#2A3F5C">—</div>
+          <div style="text-align:right">
+            ${isMF
+              ?`<button class="btn btn-amber btn-sm" style="font-size:10px;padding:4px 10px" onclick="window.open('${p.dhanMFUrl||"https://dhan.co/mutual-funds/"}','_blank')">📱 Invest</button>`
+              :`<button class="btn btn-blue btn-sm" style="font-size:10px;padding:4px 10px" onclick="switchTab('execute')">⚡ Buy</button>`}
           </div>
         </div>`;
         return;
       }
-      out+=`<div style="border-bottom:1px solid #111D2E">
-        <div class="htable-row" style="${isLegacy?"background:rgba(79,195,247,0.03);":""}cursor:${canExpand?"pointer":"default"}"
-          onclick="${canExpand?`S.expandedTicker=S.expandedTicker==='${p.ticker}'?null:'${p.ticker}';render()`:""}">
-          <div style="display:flex;align-items:center;gap:10px">
-            ${canExpand?`<span style="font-size:10px;color:#40556A;width:10px;flex-shrink:0">${isExpanded?"▾":"▸"}</span>`:`<span style="width:10px;flex-shrink:0"></span>`}
+
+      // ── Held but not purchased since tracking date ────────────────────────
+      if(h.notTracked){
+        out+=`<div style="border-bottom:1px solid #0A1520">
+          <div class="htable-row" style="opacity:0.30">
+            <div style="display:flex;align-items:center;gap:8px;padding-left:14px">
+              <div style="width:34px;height:34px;border-radius:8px;background:#0A0E14;border:1px solid #111D2E;display:flex;align-items:center;justify-content:center;font-size:16px;filter:grayscale(1)">${p.icon}</div>
+              <div>
+                <div style="display:flex;align-items:center;gap:5px">
+                  <span class="mono" style="font-size:12px;font-weight:700;color:#40556A">${p.ticker}</span>
+                  <span class="badge" style="font-size:9px;padding:2px 5px;background:#080808;border:1px solid #1a1a1a;color:#2A3F5C">not purchased since ${S.trackingStartDate}</span>
+                </div>
+                <div style="font-size:10px;color:#1E2E3E;margin-top:2px">${fmt(h.heldQty||0)} units held · excluded from totals</div>
+              </div>
+            </div>
+            <div style="text-align:right;color:#1E2E3E">—</div>
+            <div style="text-align:right;color:#1E2E3E" class="hcol3">—</div>
+            <div style="text-align:right;color:#2A3F5C" class="hcol4">${fmtC(h.ltp)}</div>
+            <div style="text-align:right;color:#1E2E3E">—</div>
+            <div style="text-align:right;color:#1E2E3E">—</div>
+          </div>
+        </div>`;
+        return;
+      }
+
+      // ── Normal held ETF row ───────────────────────────────────────────────
+      const pc=pnlColor(h.pnlPct), pb=pnlBg(h.pnlPct), pbr=pnlBorder(h.pnlPct);
+      const up        = h.ltp > h.avgCostPrice;
+      const isLegacy  = !!p.legacy;
+      const hasTrades = !!(h.trades && h.trades.length > 0);
+      const isOpen    = S.expandedTicker === p.ticker;
+
+      out += `<div style="border-bottom:1px solid #111D2E">
+
+        <div class="htable-row"
+             style="${isLegacy?"background:rgba(79,195,247,0.02);":""}${hasTrades?"cursor:pointer;":""}"
+             onclick="${hasTrades?"toggleTicker('"+p.ticker+"')":""}">
+
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="width:14px;text-align:center;flex-shrink:0;color:#4FC3F7;font-size:13px">
+              ${hasTrades ? (isOpen ? "▾" : "▸") : ""}
+            </span>
             <div style="width:36px;height:36px;border-radius:10px;background:${p.color}15;border:1px solid ${p.color}30;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${p.icon}</div>
             <div style="min-width:0">
-              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                <div class="mono" style="font-size:13px;font-weight:700;color:${p.color}">${p.ticker}</div>
-                ${isLegacy?`<span class="badge badge-dim" style="font-size:9px;padding:2px 5px">legacy</span>`:""}
-                ${h.fromTrades&&h.tradeCount?`<span class="badge" style="font-size:9px;padding:2px 5px;background:#0a2210;border:1px solid #166534;color:#6EE7B7">${h.tradeCount} trade${h.tradeCount!==1?"s":""}</span>`:""}
-                ${!h.fromTrades&&S.trackingStartDate?`<span class="badge" style="font-size:9px;padding:2px 5px;background:#1a0d00;border:1px solid #92400e;color:#D97706">no trades found</span>`:""}
+              <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+                <span class="mono" style="font-size:13px;font-weight:700;color:${p.color}">${p.ticker}</span>
+                ${isLegacy ? `<span class="badge badge-dim" style="font-size:9px;padding:2px 4px">legacy</span>` : ""}
+                ${hasTrades ? `<span class="badge" style="font-size:9px;padding:2px 5px;background:#071a07;border:1px solid #14532d;color:#6EE7B7">${h.tradeCount} trade${h.tradeCount!==1?"s":""}</span>` : ""}
               </div>
-              <div style="font-size:11px;color:#60778A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px">${p.instrument}</div>
-              <span class="badge" style="background:${p.color}12;color:${p.color};padding:2px 7px;font-size:10px;margin-top:3px">${p.category}</span>
+              <div style="font-size:11px;color:#60778A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${p.instrument}</div>
+              <span class="badge" style="background:${p.color}12;color:${p.color};padding:2px 6px;font-size:10px;margin-top:3px;display:inline-block">${p.category}</span>
             </div>
           </div>
+
           <div style="text-align:right">
             <div class="mono" style="font-size:14px;font-weight:600">${fmt(h.qty)}</div>
-            <div style="font-size:11px;color:#40556A">${h.fromTrades?"tracked":"units"}</div>
-            ${h.fromTrades&&h.heldQty&&h.heldQty!==h.qty?`<div style="font-size:10px;color:#2A3F5C">${fmt(h.heldQty)} held</div>`:""}
+            <div style="font-size:10px;color:#40556A">${h.fromTrades?"tracked":"units"}</div>
+            ${h.fromTrades && h.heldQty && h.heldQty!==h.qty ? `<div style="font-size:10px;color:#2A3F5C">${fmt(h.heldQty)} held</div>` : ""}
           </div>
-          <div style="text-align:right" class="hcol3"><div class="mono" style="font-size:14px">${fmtC(h.avgCostPrice)}</div></div>
-          <div style="text-align:right" class="hcol4"><div class="mono" style="font-size:14px;font-weight:600;color:${up?"#4ADE80":h.ltp<h.avgCostPrice?"#F87171":"#D8E3EF"}">${fmtC(h.ltp)}</div></div>
-          <div style="text-align:right"><div class="mono" style="font-size:14px;font-weight:600;color:#4FC3F7">${fmtC(h.currentValue)}</div></div>
+          <div style="text-align:right" class="hcol3">
+            <span class="mono" style="font-size:13px">${fmtC(h.avgCostPrice)}</span>
+          </div>
+          <div style="text-align:right" class="hcol4">
+            <span class="mono" style="font-size:14px;font-weight:600;color:${up?"#4ADE80":h.ltp<h.avgCostPrice?"#F87171":"#D8E3EF"}">${fmtC(h.ltp)}</span>
+          </div>
+          <div style="text-align:right">
+            <span class="mono" style="font-size:14px;font-weight:600;color:#4FC3F7">${fmtC(h.currentValue)}</span>
+          </div>
           <div style="text-align:right">
             <div class="mono" style="font-size:13px;font-weight:700;color:${pc}">${h.unrealizedPnL>=0?"+":"−"}${fmtC(Math.abs(h.unrealizedPnL))}</div>
-            <span class="badge" style="background:${pb};border:1px solid ${pbr};color:${pc};margin-top:4px">${fmtP(h.pnlPct)}</span>
+            <span class="badge" style="background:${pb};border:1px solid ${pbr};color:${pc};margin-top:3px;display:inline-block">${fmtP(h.pnlPct)}</span>
           </div>
         </div>
-        ${isExpanded&&h.trades.length?`
-        <div style="background:#050C14;border-top:1px solid #0E1A28;padding:0 0 6px 0">
-          <div style="display:grid;grid-template-columns:100px 1fr 1fr 1fr;gap:0;padding:8px 20px 6px 54px;font-size:10px;color:#2A3F5C;text-transform:uppercase;letter-spacing:.7px">
+
+        ${isOpen && hasTrades ? `
+        <div style="background:#03080F;border-top:1px solid #0D1822">
+          <div style="display:grid;grid-template-columns:120px 70px 1fr 1fr;padding:7px 20px 7px 58px;font-size:10px;color:#2A3F5C;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid #080E18">
             <div>Date</div><div style="text-align:right">Qty</div><div style="text-align:right">Price</div><div style="text-align:right">Amount</div>
           </div>
           ${h.trades.map((tr,ti)=>`
-          <div style="display:grid;grid-template-columns:100px 1fr 1fr 1fr;gap:0;padding:6px 20px 6px 54px;border-top:1px solid #0A1520;${ti%2===0?"background:#050C14":"background:#060E18"}">
+          <div style="display:grid;grid-template-columns:120px 70px 1fr 1fr;padding:8px 20px 8px 58px;${ti%2===0?"background:#03080F":"background:#050C14"};border-bottom:1px solid #080E18">
             <div class="mono" style="font-size:12px;color:#60778A">${tr.date||"—"}</div>
             <div class="mono" style="text-align:right;font-size:13px;color:#D8E3EF">${fmt(tr.qty)}</div>
             <div class="mono" style="text-align:right;font-size:13px;color:#94A3B8">${fmtC(tr.price)}</div>
             <div class="mono" style="text-align:right;font-size:13px;font-weight:600;color:#4FC3F7">${fmtC(tr.amount)}</div>
           </div>`).join("")}
-          <div style="display:grid;grid-template-columns:100px 1fr 1fr 1fr;gap:0;padding:8px 20px 8px 54px;border-top:1px solid #18263A;background:#040B12">
-            <div style="font-size:10px;color:#40556A;text-transform:uppercase">Total</div>
-            <div class="mono" style="text-align:right;font-size:13px;font-weight:700;color:#6EE7B7">${fmt(h.trades.reduce((s,t)=>s+t.qty,0))}</div>
+          <div style="display:grid;grid-template-columns:120px 70px 1fr 1fr;padding:8px 20px 8px 58px;background:#020609;border-top:1px solid #1a2535">
+            <div style="font-size:10px;color:#40556A;text-transform:uppercase;padding-top:3px">Total</div>
+            <div class="mono" style="text-align:right;font-size:14px;font-weight:700;color:#6EE7B7">${fmt(h.qty)}</div>
             <div class="mono" style="text-align:right;font-size:12px;color:#60778A">${fmtC(h.avgCostPrice)} avg</div>
-            <div class="mono" style="text-align:right;font-size:13px;font-weight:700;color:#4FC3F7">${fmtC(h.investedValue)}</div>
+            <div class="mono" style="text-align:right;font-size:14px;font-weight:700;color:#4FC3F7">${fmtC(h.investedValue)}</div>
           </div>
-        </div>`:""}
+        </div>` : ""}
+
       </div>`;
     });
 
@@ -2494,6 +2516,7 @@ function renderSettings(){
    MAIN RENDER
 ══════════════════════════════════════════════════ */
 function switchTab(t){if(S.tab==="growth")destroyChart();S.tab=t;render();}
+function toggleTicker(ticker){S.expandedTicker=(S.expandedTicker===ticker?null:ticker);render();}
 
 function render(){
   const isSandbox=S.dhanEnv==="sandbox";

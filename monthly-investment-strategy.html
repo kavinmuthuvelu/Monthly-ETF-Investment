@@ -1146,8 +1146,15 @@ async function fetchPortfolio(demo=false){
     tradeMap={};
     const unresolved=new Set();
     buys.forEach(t=>{
+      // Skip mutual fund trades — Indian MF ISINs always start with "INF"
+      const tIsin=(t.isin||t.isinCode||"").toUpperCase().trim();
+      if(tIsin.startsWith("INF")) return;
+      // Skip zero-secId entries with no symbol (likely MF order records)
+      const tSym=(t.tradingSymbol||t.symbol||"").toUpperCase().trim();
+      if(String(t.securityId||"0")==="0" && !tSym) return;
+
       const meta=resolveTradeToMeta(t);
-      if(!meta){ unresolved.add((t.tradingSymbol||t.symbol||"?").toUpperCase()); return; }
+      if(!meta){ unresolved.add(tSym||"?"); return; }
 
       const qty   = parseFloat(t.tradedQuantity||t.fillQty||t.executedQty||t.quantity||0);
       const price = parseFloat(t.tradedPrice||t.fillPrice||t.avgPrice||t.price||0);

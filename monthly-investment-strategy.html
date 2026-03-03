@@ -284,7 +284,7 @@ const S = {
   clientId:  localStorage.getItem("dhan_client_id") || "",
   startDate: localStorage.getItem("start_date")     || "",
   trackingStartDate: localStorage.getItem("tracking_start_date") || "",  // for investment accounting
-  proxyUrl:  localStorage.getItem("proxy_url")      || "http://localhost:8080",
+  proxyUrl:  localStorage.getItem("proxy_url")      || (location.protocol==="file:"?"http://localhost:8080":location.origin),
   dhanEnv:   localStorage.getItem("dhan_env")       || "production",  // "production" | "sandbox"
   proxyActive:   false,
   proxyTesting:  false,
@@ -2386,7 +2386,7 @@ function renderSettings(){
           </div>
           <div>
             <label class="inp-label">Proxy URL</label>
-            <input class="inp" type="text" placeholder="http://localhost:8080" value="${S.proxyUrl}"
+            <input class="inp" type="text" placeholder="e.g. https://dhan-proxy-xxxx.onrender.com" value="${S.proxyUrl}"
               oninput="S.proxyUrl=this.value;localStorage.setItem('proxy_url',this.value)">
           </div>
           <div class="btn-row">
@@ -2480,7 +2480,7 @@ function renderSettings(){
                     </div>`;}).join("")}
                   </div>`}
             </div>
-            <button class="btn btn-red btn-sm" onclick="if(confirm('Clear all stored data?')){localStorage.clear();S.apiKey='';S.clientId='';S.startDate='';S.proxyUrl='http://localhost:8080';S.dhanEnv='production';S.proxyActive=false;S.connected=false;S.history=[];S.etfHoldings=[];S.snapshots=[];S.snap30=null;S.thirtyDayPnLPct=0;S.lossPercent=0;S.reqLog=[];S.mfHoldings={};S.mfNavs={};render();showToast('All data cleared','error');}">
+            <button class="btn btn-red btn-sm" onclick="if(confirm('Clear all stored data?')){localStorage.clear();S.apiKey='';S.clientId='';S.startDate='';S.proxyUrl=(location.protocol==="file:"?"http://localhost:8080":location.origin);S.dhanEnv='production';S.proxyActive=false;S.connected=false;S.history=[];S.etfHoldings=[];S.snapshots=[];S.snap30=null;S.thirtyDayPnLPct=0;S.lossPercent=0;S.reqLog=[];S.mfHoldings={};S.mfNavs={};render();showToast('All data cleared','error');}">
               🗑️ Clear All Local Data
             </button>
           </div>

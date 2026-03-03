@@ -190,12 +190,7 @@ code{font-family:'DM Mono',monospace;color:#C9940E;font-size:11px}
 /* ══════════════════════════════════════════════════
    DATA
 ══════════════════════════════════════════════════ */
-// ── Instrument types ──────────────────────────────────────────────────
-// type:"MF"  → Mutual Fund (invest via Dhan MF platform / BSE StarMF)
-// type:"ETF" → Exchange-traded (buy via /v2/orders, shows in /v2/holdings)
-// ─────────────────────────────────────────────────────────────────────
 const PORTFOLIO = [
-  // Ordered by allocation weight — 4 ETFs + 2 MFs = 100%
   {id:"niftybees",
    category:"Nifty 50",
    weight:30,
@@ -264,13 +259,11 @@ const PORTFOLIO = [
    icon:"🥈",
    securityId:null},
 ];
-// Weights: 30+40+9+11+5+5 = 100%
 
-const ETF_PORTFOLIO = PORTFOLIO.filter(p=>p.type==="ETF");   // NIFTYBEES, MON100, GOLDBEES, SILVERBEES
-const MF_PORTFOLIO  = PORTFOLIO.filter(p=>p.type==="MF");    // UTIMQ100, PPFCF
-const STRATEGY_ETF  = ETF_PORTFOLIO;                          // all 4 ETFs are active strategy
+const ETF_PORTFOLIO = PORTFOLIO.filter(p=>p.type==="ETF");
+const MF_PORTFOLIO  = PORTFOLIO.filter(p=>p.type==="MF");
+const STRATEGY_ETF  = ETF_PORTFOLIO;
 
-// Dual lookup: tradingSymbol primary (reliable), ISIN fallback
 const ISIN_MAP   = Object.fromEntries(ETF_PORTFOLIO.map(p=>[p.isin.toUpperCase(), p]));
 const SYMBOL_MAP = Object.fromEntries(ETF_PORTFOLIO.map(p=>[p.ticker.toUpperCase(), p]));
 const BASE_SIP = 22000;
@@ -283,9 +276,9 @@ const S = {
   apiKey:    localStorage.getItem("dhan_api_key")   || "",
   clientId:  localStorage.getItem("dhan_client_id") || "",
   startDate: localStorage.getItem("start_date")     || "",
-  trackingStartDate: localStorage.getItem("tracking_start_date") || "",  // for investment accounting
+  trackingStartDate: localStorage.getItem("tracking_start_date") || "",
   proxyUrl:  localStorage.getItem("proxy_url")      || (location.protocol==="file:"?"http://localhost:8080":location.origin),
-  dhanEnv:   localStorage.getItem("dhan_env")       || "production",  // "production" | "sandbox"
+  dhanEnv:   localStorage.getItem("dhan_env")       || "production",
   proxyActive:   false,
   proxyTesting:  false,
   renewingToken: false,
@@ -295,8 +288,8 @@ const S = {
   lossPercent:   0,
   etfHoldings:   [],
   unmatchedHoldings: [],
-  expandedTicker: null,   // which ETF row is expanded to show trade detail
-  showOtherHoldings: false,   // collapsed by default — not accounted in totals
+  expandedTicker: null,
+  showOtherHoldings: false,
   portfolioLoading: false,
   portfolioError:   null,
   lastRefreshed:    null,
@@ -305,25 +298,22 @@ const S = {
   snap30:    null,
   thirtyDayPnLPct: 0,
   history:   [],
-  orders:    [],          // trades placed by this session
-  todayOrders: [],        // synced from /v2/orders
+  orders:    [],
+  todayOrders: [],
   todayOrdersLoading: false,
   todayOrdersError:   null,
-  reqLog:    [],          // live diagnostics
-  // ── MF holdings (manually entered + AMFI NAV enriched) ──────────
-  mfHoldings: loadMFHoldings(),   // { [isin]: [ {date, units, nav, amount}, ... ] }
-  mfNavs:     {},                 // { [isin]: { nav, date, schemeName } }  from AMFI
+  reqLog:    [],
+  mfHoldings: loadMFHoldings(),
+  mfNavs:     {},
   mfNavLoading: false,
   mfNavError: null,
-  // ── Growth chart ────────────────────────────────────────────────
-  nifty50History: null,        // {dates:[], closes:[]} from Dhan historical API
+  nifty50History: null,
   nifty50Loading: false,
   nifty50Error:   null,
-  chartInstance:  null,        // Chart.js instance ref
-  // ────────────────────────────────────────────────────────────────
+  chartInstance:  null,
   toastTimer:null,
   refreshTimer:null,
-  om: {                   // order modal state
+  om: {
     open:false, p:null, phase:"idle",
     orderId:null, message:"", charges:null,
     tradedPrice:null, tradedQty:null, amount:0,
@@ -358,7 +348,6 @@ function loadSnapshots(){ try{return JSON.parse(localStorage.getItem(SNAP_KEY)||
 function loadMFHoldings(){
   try{
     const raw=JSON.parse(localStorage.getItem("mf_holdings")||"{}");
-    // migrate old format {units,avgNav,...} → [{date,units,nav,amount}]
     const out={};
     Object.entries(raw).forEach(([isin,v])=>{
       if(Array.isArray(v)) out[isin]=v;
@@ -370,15 +359,10 @@ function loadMFHoldings(){
   }catch{return {};}
 }
 function saveMFHoldings(h){ localStorage.setItem("mf_holdings",JSON.stringify(h)); }
+
 /* ══════════════════════════════════════════════════
    GROWTH CHART HELPERS
-   - "Invested" line  = cumulative SIPs from S.history since trackingStartDate
-   - "Portfolio" line = portfolio snapshots since trackingStartDate
-   - "NIFTYBEES SIP"  = simulated: each SIP buys NIFTYBEES units instead;
-                        shows what the same money in NIFTYBEES would be worth
 ══════════════════════════════════════════════════ */
-
-// SIP history entries on/after trackingStartDate, oldest first
 function filteredSIPHistory(){
   const sd = S.trackingStartDate;
   return S.history
@@ -387,7 +371,6 @@ function filteredSIPHistory(){
     .sort((a,b) => a.isoDate.localeCompare(b.isoDate));
 }
 
-// Normalise whatever date format S.history uses → "YYYY-MM-DD"
 function normaliseDate(d){
   if(!d) return "";
   if(/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
@@ -397,7 +380,6 @@ function normaliseDate(d){
   try{ return new Date(d).toISOString().slice(0,10); } catch{ return d; }
 }
 
-// Build monthly axis dates from startD → today
 function buildAxisDates(startD){
   const axisDates=[];
   let cur=new Date(startD); const end=new Date();
@@ -407,7 +389,6 @@ function buildAxisDates(startD){
   return axisDates;
 }
 
-// Cumulative invested from SIP history, aligned to axisDates
 function buildCumulativeInvested(axisDates){
   const entries = filteredSIPHistory();
   if(!entries.length) return axisDates.map(()=>0);
@@ -418,25 +399,21 @@ function buildCumulativeInvested(axisDates){
   });
 }
 
-// Simulate: same SIPs buying NIFTYBEES units, returns cumulative portfolio value per axis date
 function buildNiftybeesSIP(axisDates){
   if(!S.nifty50History) return null;
   const entries = filteredSIPHistory();
   if(!entries.length) return null;
 
   const {dates:nd, closes:nc} = S.nifty50History;
-  // Build a map: date → close (use last known price for any date)
   const niftyMap = {};
   nd.forEach((d,i)=>{ niftyMap[d]=nc[i]; });
 
-  // Find the NIFTYBEES close on or before a given date
   function priceAt(d){
     let p=null;
     for(const nd2 of nd){ if(nd2<=d) p=niftyMap[nd2]; else break; }
     return p;
   }
 
-  // Accumulate units bought on each SIP date
   let totalUnits=0;
   let entryIdx=0;
   return axisDates.map(d=>{
@@ -451,7 +428,6 @@ function buildNiftybeesSIP(axisDates){
   });
 }
 
-// Approximate XIRR using Newton-Raphson, from SIP history vs current portfolio value
 function computeXIRR(curVal){
   try{
     const entries = filteredSIPHistory();
@@ -491,10 +467,8 @@ function buildGrowthChart(){
   const axisDates = buildAxisDates(startD);
   const today = axisDates[axisDates.length-1];
 
-  // Dataset 1: cumulative invested (step)
   const investedData = buildCumulativeInvested(axisDates);
 
-  // Dataset 2: portfolio value from snapshots + current live value
   const snapMap={};
   S.snapshots.forEach(s=>{
     if(!S.trackingStartDate||s.date>=S.trackingStartDate) snapMap[s.date]=s.value;
@@ -509,7 +483,6 @@ function buildGrowthChart(){
     return best;
   });
 
-  // Dataset 3: NIFTYBEES SIP simulation
   const niftyData = buildNiftybeesSIP(axisDates);
 
   const labels=axisDates.map(d=>{
@@ -594,7 +567,6 @@ function buildGrowthChart(){
 function renderGrowth(){
   const sipEntries = filteredSIPHistory();
   const totalInv   = sipEntries.reduce((s,e)=>s+e.amount,0);
-  // ETF invested = from tradebook (etfHoldings.investedValue) or holdings fallback
   const etfInv     = S.etfHoldings.reduce((s,h)=>s+(h.investedValue||0),0);
   const mfInv      = MF_PORTFOLIO.reduce((s,p)=>s+mfTotalInvested(p.isin),0);
   const totalInvAll= etfInv+mfInv;
@@ -607,7 +579,6 @@ function renderGrowth(){
 
   return `<div class="anim-fade">
 
-  <!-- Status bar (no date input here — it lives in Portfolio tab header) -->
   <div class="card" style="margin-bottom:18px">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div style="font-size:13px;color:#60778A">
@@ -630,7 +601,6 @@ function renderGrowth(){
     ${S.nifty50Error?`<div style="margin-top:10px;padding:8px 12px;background:#180D00;border:1px solid #78350f;border-radius:8px;font-size:12px;color:#D97706">⚠️ ${S.nifty50Error}</div>`:""}
   </div>
 
-  <!-- Stats -->
   <div class="grid-4" style="margin-bottom:18px">
     <div class="stat-card">
       <div class="stat-label">ETF Invested</div>
@@ -656,7 +626,6 @@ function renderGrowth(){
     </div>
   </div>
 
-  <!-- Chart -->
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
       <div>
@@ -682,10 +651,10 @@ function renderGrowth(){
 
 function saveSnapshot(v){ const t=new Date().toISOString().slice(0,10); let s=loadSnapshots().filter(x=>x.date!==t); s.unshift({date:t,value:v}); s=s.slice(0,90); localStorage.setItem(SNAP_KEY,JSON.stringify(s)); return s; }
 function get30DayValue(snaps){ if(!snaps.length)return null; const t=new Date(); t.setDate(t.getDate()-30); const ts=t.toISOString().slice(0,10); let best=null,bd=Infinity; snaps.forEach(s=>{const d=Math.abs(new Date(s.date)-new Date(ts))/864e5; if(d<=5&&d<bd){bd=d;best=s;}}); return best; }
+
 /* ══════════════════════════════════════════════════
-   MF HOLDINGS — manual entry + AMFI NAV enrichment
+   MF HOLDINGS
 ══════════════════════════════════════════════════ */
-// MF helpers — mfHoldings[isin] is now an array of {date,units,nav,amount}
 function mfEntries(isin){ return S.mfHoldings[isin]||[]; }
 function mfTotalUnits(isin){ return mfEntries(isin).reduce((s,e)=>s+e.units,0); }
 function mfTotalInvested(isin){ return mfEntries(isin).reduce((s,e)=>s+e.amount,0); }
@@ -712,7 +681,6 @@ function addMFEntry(isin, date, units, nav, amount){
     nav:   parseFloat(nav)||0,
     amount:parseFloat(amount)||(parseFloat(units)*parseFloat(nav))||0,
   });
-  // keep sorted oldest first
   S.mfHoldings[isin].sort((a,b)=>a.date.localeCompare(b.date));
   saveMFHoldings(S.mfHoldings);
   render(); showToast("MF entry added ✓");
@@ -758,8 +726,7 @@ async function fetchAMFINavs(){
 }
 
 /* ══════════════════════════════════════════════════
-   SCRIP LOOKUP — auto-fills ETF security IDs from
-   Dhan scrip master CSV via proxy /scrip-lookup
+   SCRIP LOOKUP
 ══════════════════════════════════════════════════ */
 async function lookupSecurityIds(){
   if(!S.proxyActive){ showToast("Enable proxy first","error"); return; }
@@ -768,12 +735,9 @@ async function lookupSecurityIds(){
 
   showToast(`Looking up ${etfs.length} security ID(s)…`);
   const symbols = etfs.map(p=>p.ticker).join(",");
-  const isins   = etfs.map(p=>p.isin).join(",");
 
   try {
     const base = S.proxyUrl.replace(/\/+$/,"");
-
-    // Try by ticker first (compact CSV, faster)
     const r1 = await fetch(`${base}/scrip-lookup?symbols=${encodeURIComponent(symbols)}`);
     const d1 = await r1.json().catch(()=>({}));
     let found = 0;
@@ -783,7 +747,6 @@ async function lookupSecurityIds(){
       if(hit?.securityId){ p.securityId=hit.securityId; found++; }
     });
 
-    // For any still missing, try by ISIN (detailed CSV)
     const stillMissing = ETF_PORTFOLIO.filter(p=>!p.securityId);
     if(stillMissing.length){
       const isinStr = stillMissing.map(p=>p.isin).join(",");
@@ -809,7 +772,6 @@ async function lookupSecurityIds(){
 }
 
 function makeDemoHoldings(){
-  // Demo only covers ETFs (MFs don't appear in /v2/holdings)
   return ETF_PORTFOLIO.map((p,i)=>{
     const qty=[30,50,15][i]||20, avg=[230,125,80][i]||100;
     const delta=[8,3,-5][i]||2, ltp=avg+delta, inv=qty*avg, cur=qty*ltp;
@@ -862,12 +824,9 @@ function repaintReqLog(){
 }
 
 /* ══════════════════════════════════════════════════
-   CORE API WRAPPER  — ALL DHAN CALLS GO THROUGH HERE
-   Reads body as text first to avoid JSON.parse crash
-   on HTML error pages (the "Invalid CORS request" bug)
+   CORE API WRAPPER
 ══════════════════════════════════════════════════ */
 async function dhanApi(method, path, body){
-  // Always route through proxy — direct calls will CORS-fail
   if(!S.proxyActive){
     const errMsg = "Proxy not active — enable proxy in Settings first";
     addReqLog(method, path, "NO_PROXY", 0, errMsg);
@@ -879,7 +838,6 @@ async function dhanApi(method, path, body){
   const t0   = Date.now();
   const reqId = t0;
 
-  // Add pending entry
   S.reqLog.unshift({id:reqId, ts:new Date().toLocaleTimeString('en-GB',{hour12:false}), method, path, status:"…", ms:0, detail:null});
   if(S.reqLog.length>50)S.reqLog.pop();
   repaintReqLog();
@@ -889,7 +847,7 @@ async function dhanApi(method, path, body){
     "Accept":       "application/json",
     "access-token": S.apiKey || "",
     "dhanClientId": S.clientId || "",
-    "X-Dhan-Host":  dhanHost(),  // proxy uses this to route to sandbox vs production
+    "X-Dhan-Host":  dhanHost(),
   };
 
   try {
@@ -899,7 +857,6 @@ async function dhanApi(method, path, body){
       body: body ? JSON.stringify(body) : undefined
     });
 
-    // Always read as text to avoid crash on non-JSON responses
     const text = await res.text();
     const ms   = Date.now()-t0;
     let json=null, parseErr=null;
@@ -948,11 +905,9 @@ async function testProxy(){
       const j=await r.json().catch(()=>({}));
       S.proxyActive=true;
       showToast(`Proxy ✓ ${j.proxy||"running"} at ${base}`);
-      // Opportunistically fetch MF NAVs if we have MF funds
       if(MF_PORTFOLIO.length) setTimeout(fetchAMFINavs,200);
     } else throw new Error("HTTP "+r.status);
   } catch(e){
-    // Fallback — any response from /v2/holdings means proxy is reachable
     try{
       const r2=await fetch(base+"/v2/holdings",{
         headers:{"access-token":S.apiKey||"probe","X-Dhan-Host":dhanHost()},
@@ -979,7 +934,6 @@ function connectDhan(){
   if(!S.proxyActive){showToast("Enable proxy first — click Test Connection","error");return;}
   S.connected=true; render(); showToast("Connected ✓ — fetching portfolio…");
   fetchPortfolio(false);
-  // Also fetch MF NAVs (doesn't need Dhan credentials)
   fetchAMFINavs();
 }
 
@@ -1027,7 +981,7 @@ async function fetchPortfolio(demo=false){
     S.portfolioLoading=false; render(); showToast("Demo loaded ✓"); return;
   }
 
-  // ── STEP 1: /v2/holdings — always needed for securityId, qty, exchange ────
+  // ── STEP 1: /v2/holdings ─────────────────────────────────────────────────
   const hR = await dhanApi("GET", "/v2/holdings");
   if(!hR.ok){
     S.portfolioError = hR.status===403 ? `TOKEN_403:${hR.error}` : hR.error||`HTTP ${hR.status}`;
@@ -1050,7 +1004,7 @@ async function fetchPortfolio(demo=false){
   addReqLog("PARSE","/v2/holdings",`${allH.length} total`,0,
     `matched=${matched.length} symbols=[${allH.map(h=>(h.tradingSymbol||"?").slice(0,10)).join(",")}]`);
 
-  // ── STEP 2: LTP for all matched ETFs ─────────────────────────────────────
+  // ── STEP 2: LTP ───────────────────────────────────────────────────────────
   const toSeg={"NSE":"NSE_EQ","BSE":"BSE_EQ","NSE_EQ":"NSE_EQ","BSE_EQ":"BSE_EQ","ALL":"NSE_EQ"};
   let ltpMap={};
   if(matched.length){
@@ -1072,10 +1026,7 @@ async function fetchPortfolio(demo=false){
     }
   }
 
-  // ── STEP 3: If trackingStartDate set → fetch tradebook for invested cost ──
-  // /v2/trades/{from}/{to}/{page} — page through all BUY trades since that date
-  // and aggregate qty + invested per ETF ticker.
-  // This replaces the lifetime avgCostPrice from /v2/holdings.
+  // ── STEP 3: Tradebook (if trackingStartDate set) ──────────────────────────
   let tradeMap = null;
 
   if(S.trackingStartDate && matched.length){
@@ -1097,14 +1048,11 @@ async function fetchPortfolio(demo=false){
       return tx==="BUY" || tx==="B";
     });
 
-    // securityId→meta: built from /v2/holdings which always has correct securityId
     const secIdMap={};
     matched.forEach(({h,meta})=>{
       if(h.securityId) secIdMap[String(h.securityId)]=meta;
     });
 
-    // Also build partial-name map: "GOLDBEES" matches "NIPPON INDIA ETF GOLD BEES" etc.
-    // and common Dhan-specific aliases
     const ALIASES = {
       "MON100":     ["MON100","MON100-EQ","MON100BE","MOTOSWALD","MOTILALOSWNN","MOFN100"],
       "GOLDBEES":   ["GOLDBEES","NIPGOLDETF","GOLD BEES","NIPPON GOLD","GOLDIETF"],
@@ -1117,7 +1065,6 @@ async function fetchPortfolio(demo=false){
     });
 
     function resolveTradeToMeta(t){
-      // Try every known field name for tradingSymbol and securityId
       const rawSym  = (t.tradingSymbol||t.symbol||t.scripName||t.customSymbol||"").toUpperCase().trim();
       const cleanSym= rawSym.replace(/[-_ ]?(EQ|BE|N1|N2|N3|N4|N5|ETF)$/,"").trim();
       const isn     = (t.isin||t.isinCode||"").toUpperCase().trim();
@@ -1132,7 +1079,6 @@ async function fetchPortfolio(demo=false){
           || null;
     }
 
-    // Log every unique (symbol, isin, secId) tuple so user can diagnose mismatches
     const tradeKeys=[...new Set(buys.map(t=>{
       const s=(t.tradingSymbol||t.symbol||"?").toUpperCase();
       const sec=t.securityId||t.scripId||"";
@@ -1146,21 +1092,30 @@ async function fetchPortfolio(demo=false){
     tradeMap={};
     const unresolved=new Set();
     buys.forEach(t=>{
-      // Skip mutual fund trades — Indian MF ISINs always start with "INF"
-      const tIsin=(t.isin||t.isinCode||"").toUpperCase().trim();
-      if(tIsin.startsWith("INF")) return;
-      // Skip zero-secId entries with no symbol (likely MF order records)
-      const tSym=(t.tradingSymbol||t.symbol||"").toUpperCase().trim();
-      if(String(t.securityId||"0")==="0" && !tSym) return;
+      // ─────────────────────────────────────────────────────────────────────
+      // FIX: Do NOT filter by "INF" ISIN prefix.
+      // All Indian ETF ISINs also start with "INF" (e.g. NIFTYBEES=INF204KB13I2).
+      // The old check `if(tIsin.startsWith("INF")) return` was silently dropping
+      // every single ETF trade. Instead, skip only ISINs that exactly match
+      // a known MF in our portfolio (which truly can't be bought via stock API).
+      // ─────────────────────────────────────────────────────────────────────
+      const tIsin = (t.isin||t.isinCode||"").toUpperCase().trim();
+      const tSym  = (t.tradingSymbol||t.symbol||"").toUpperCase().trim();
+
+      // Skip if this ISIN belongs to one of our MF holdings
+      const isMFIsin = MF_PORTFOLIO.some(p => p.isin.toUpperCase() === tIsin);
+      if(isMFIsin) return;
+
+      // Skip records with no identifiable symbol, no ISIN, and securityId=0
+      if(String(t.securityId||"0")==="0" && !tSym && !tIsin) return;
 
       const meta=resolveTradeToMeta(t);
-      if(!meta){ unresolved.add(tSym||"?"); return; }
+      if(!meta){ unresolved.add(tSym||tIsin||"?"); return; }
 
       const qty   = parseFloat(t.tradedQuantity||t.fillQty||t.executedQty||t.quantity||0);
       const price = parseFloat(t.tradedPrice||t.fillPrice||t.avgPrice||t.price||0);
       if(!qty||!price) return;
 
-      // Parse trade date from various possible field names
       const rawDate = t.exchangeTime||t.createTime||t.tradeDate||t.orderDate||"";
       const tradeDate = rawDate
         ? (rawDate.includes("T") ? rawDate.slice(0,10) : rawDate.slice(0,10))
@@ -1176,7 +1131,6 @@ async function fetchPortfolio(demo=false){
       tradeMap[meta.ticker].trades.push({date:tradeDate, qty, price, amount:qty*price});
     });
 
-    // Sort trades oldest→newest per ticker
     Object.values(tradeMap).forEach(td=>{
       td.trades.sort((a,b)=>a.date.localeCompare(b.date));
     });
@@ -1185,7 +1139,7 @@ async function fetchPortfolio(demo=false){
       addReqLog("WARN","trades: unresolved",`[${[...unresolved].join(", ")}]`,0,
         "Check Settings → Diagnostics for symbol/id — add alias to ALIASES map if needed");
     }
-  }  // end if(S.trackingStartDate)
+  }
 
   // ── STEP 4: Build etfHoldings ─────────────────────────────────────────────
   S.etfHoldings = matched.map(({h, meta})=>{
@@ -1193,14 +1147,12 @@ async function fetchPortfolio(demo=false){
              || parseFloat(h.lastTradedPrice||h.ltp||0)
              || parseFloat(h.avgCostPrice)||0;
 
-    // Back-fill securityId for order placement
     const portEntry=ETF_PORTFOLIO.find(p=>
       p.ticker.toUpperCase()===(h.tradingSymbol||"").toUpperCase()||
       p.isin.toUpperCase()===(h.isin||"").toUpperCase());
     if(portEntry&&!portEntry.securityId&&h.securityId) portEntry.securityId=String(h.securityId);
 
     if(tradeMap&&tradeMap[meta.ticker]){
-      // Cost AND qty from tradebook (date-filtered only)
       const td = tradeMap[meta.ticker];
       const heldQty    = parseInt(h.totalQty||h.dpQty||0);
       const tradeQty   = td.qty;
@@ -1220,22 +1172,18 @@ async function fetchPortfolio(demo=false){
         trades: td.trades||[],
       };
     } else if(tradeMap){
-      // trackingStartDate is set but zero trades found for this ETF → exclude from totals
-      // Return a sentinel so the row renders as "not purchased since [date]"
       const heldQty = parseInt(h.totalQty||h.dpQty||0);
-      const ltp2 = ltp;
       return{
         ...meta,...h, ticker:meta.ticker,
         qty:0, heldQty,
-        ltp:ltp2, avgCostPrice:0,
+        ltp, avgCostPrice:0,
         investedValue:0, currentValue:0,
         unrealizedPnL:0, pnlPct:0,
         t1Qty:0, availableQty:parseInt(h.availableQty||heldQty),
         fromTrades:true, tradeCount:0, tradeSymbols:"", trades:[],
-        notTracked:true,  // flag: held but not bought since tracking date
+        notTracked:true,
       };
     } else {
-      // No tracking date — use lifetime avg from /v2/holdings
       const qty=parseInt(h.totalQty||h.dpQty||0);
       const avgCost=parseFloat(h.avgCostPrice)||0;
       const inv=qty*avgCost, cur=qty*ltp;
@@ -1336,15 +1284,12 @@ function paintOrderModal(){
   el("om-ticker").textContent=p.ticker;
   el("om-amt").textContent=fmtC(om.amount);
 
-  // Lock/unlock X button
   const xbtn=el("om-x");
   xbtn.disabled=locked; xbtn.style.opacity=locked?"0.2":"1";
 
   let statusHtml="";
   if(om.phase==="idle"){
-    statusHtml=`<div class="om-status om-idle">
-      Ready to place a MARKET BUY order. Confirm to send to ${dhanHost()}.
-    </div>`;
+    statusHtml=`<div class="om-status om-idle">Ready to place a MARKET BUY order. Confirm to send to ${dhanHost()}.</div>`;
   } else if(om.phase==="placing"){
     statusHtml=`<div class="om-status om-placing" style="display:flex;align-items:center;gap:12px">
       <span class="spin" style="font-size:22px">⟳</span>
@@ -1360,8 +1305,7 @@ function paintOrderModal(){
         </div>
       </div>
       <div style="padding:10px 12px;background:rgba(0,0,0,.3);border-radius:8px;font-size:12px">
-        ⚠️ <strong>Do not close this window.</strong> Waiting for TRADED or REJECTED status from the exchange.
-        If market is closed the order will be queued as AMO.
+        ⚠️ <strong>Do not close this window.</strong> Waiting for TRADED or REJECTED status.
       </div>
     </div>`;
   } else if(om.phase==="done"){
@@ -1378,26 +1322,14 @@ function paintOrderModal(){
       </div>
       <div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(52,211,153,.2);font-size:12px">
         Total charges: <span class="mono" style="color:#6EE7B7">${fmtC(c.total)}</span>
-      </div>`:
-      `<div style="font-size:12px;opacity:.7">Fetching charges from tradebook…</div>`}
+      </div>`:`<div style="font-size:12px;opacity:.7">Fetching charges from tradebook…</div>`}
     </div>`;
   } else if(om.phase==="rejected"){
-    statusHtml=`<div class="om-status om-reject">
-      <div style="font-weight:700;margin-bottom:6px">❌ Order Rejected</div>
-      <div>${om.message||"Rejected by exchange or OMS"}</div>
-    </div>`;
+    statusHtml=`<div class="om-status om-reject"><div style="font-weight:700;margin-bottom:6px">❌ Order Rejected</div><div>${om.message||"Rejected by exchange or OMS"}</div></div>`;
   } else if(om.phase==="error"){
-    statusHtml=`<div class="om-status om-error">
-      <div style="font-weight:700;margin-bottom:6px">⚠️ Order Failed</div>
-      <div>${om.message}</div>
-      <div style="font-size:12px;margin-top:8px;color:#F87171">Check proxy connection, credentials, and market hours.</div>
-    </div>`;
+    statusHtml=`<div class="om-status om-error"><div style="font-weight:700;margin-bottom:6px">⚠️ Order Failed</div><div>${om.message}</div><div style="font-size:12px;margin-top:8px;color:#F87171">Check proxy connection, credentials, and market hours.</div></div>`;
   } else if(om.phase==="timeout"){
-    statusHtml=`<div class="om-status om-timeout">
-      <div style="font-weight:700;margin-bottom:6px">⏱️ Confirmation Timeout</div>
-      <div>Order <span class="mono">${om.orderId}</span> was placed but status confirmation timed out.</div>
-      <div style="font-size:12px;margin-top:6px">Check the Dhan app — it may be queued as AMO if market is closed.</div>
-    </div>`;
+    statusHtml=`<div class="om-status om-timeout"><div style="font-weight:700;margin-bottom:6px">⏱️ Confirmation Timeout</div><div>Order <span class="mono">${om.orderId}</span> was placed but status confirmation timed out.</div><div style="font-size:12px;margin-top:6px">Check the Dhan app — it may be queued as AMO.</div></div>`;
   }
   el("om-status").innerHTML=statusHtml;
 
@@ -1422,7 +1354,6 @@ function paintOrderModal(){
 async function executeOrder(){
   const om=S.om; if(!om.p)return;
   const p=om.p;
-
   om.phase="placing"; paintOrderModal();
 
   const r=await dhanApi("POST","/v2/orders",{
@@ -1431,7 +1362,7 @@ async function executeOrder(){
     tradingSymbol:p.ticker,
     securityId: p.securityId ||
                 (S.etfHoldings.find(h=>h.isin===p.isin)?.securityId) ||
-                p.isin,   // fallback — lookup should have run
+                p.isin,
     quantity:1, price:0
   });
 
@@ -1464,12 +1395,10 @@ async function executeOrder(){
           om.tradedPrice=parseFloat(ord.avgTradedPrice||ord.averageTradedPrice||0)||null;
           om.tradedQty  =parseInt(ord.filledQty||ord.tradedQuantity||1);
           paintOrderModal();
-          // Log to session orders
           S.orders.unshift({id:orderId,instrument:p.instrument,ticker:p.ticker,amount:om.amount,
             time:new Date().toLocaleTimeString(),status:"EXECUTED",color:p.color,icon:p.icon,
             charges:null,chargesLoading:true,tradedPrice:om.tradedPrice,tradedQty:om.tradedQty});
           showToast(`${p.ticker} ✓ executed — fetching charges…`);
-          // Async charges fetch
           (async()=>{
             let ch=null;
             for(let a=0;a<7;a++){await new Promise(r=>setTimeout(r,a===0?3000:2500));ch=await fetchChargesForOrder(orderId);if(ch)break;}
@@ -1540,13 +1469,7 @@ function logSIP(){
 }
 
 /* ══════════════════════════════════════════════════
-   TAB RENDERS
-══════════════════════════════════════════════════ */
-/* ══════════════════════════════════════════════════
    MF SECTION RENDERER
-   Shows for each MF: units + avg NAV (user-entered),
-   current NAV (from AMFI), current value, P&L.
-   No Dhan API used — AMFI is the official source.
 ══════════════════════════════════════════════════ */
 function renderMFSection(){
   const anyNav    = MF_PORTFOLIO.some(p=>S.mfNavs[p.isin]);
@@ -1561,7 +1484,6 @@ function renderMFSection(){
 
   let html=`<div style="margin-top:22px">
     <div class="htable">
-      <!-- Header -->
       <div class="htable-head">
         <div style="font-size:14px;font-weight:600">🏦 Mutual Fund Holdings</div>
         <div style="display:flex;align-items:center;gap:10px">
@@ -1573,7 +1495,6 @@ function renderMFSection(){
       </div>
       ${S.mfNavError?`<div style="padding:8px 16px;background:#180D00;border-bottom:1px solid #78350f;font-size:11px;color:#D97706">⚠️ ${S.mfNavError}</div>`:""}
 
-      <!-- Fund summary strip -->
       <div style="display:grid;grid-template-columns:${MF_PORTFOLIO.map(()=>'1fr').join(' ')};border-bottom:1px solid #18263A;background:#060C14">
         ${MF_PORTFOLIO.map(p=>{
           const nav=S.mfNavs[p.isin], totalU=mfTotalUnits(p.isin), inv=mfTotalInvested(p.isin);
@@ -1595,7 +1516,6 @@ function renderMFSection(){
         }).join("")}
       </div>
 
-      <!-- Entry log header -->
       ${allEntries.length?`
       <div class="htable-hdr" style="grid-template-columns:110px 90px 80px 1fr 1fr 28px">
         <div>Date</div><div>Fund</div><div style="text-align:right">Units</div>
@@ -1621,7 +1541,6 @@ function renderMFSection(){
       </div>`:`
       <div style="padding:20px;text-align:center;color:#2A3F5C;font-size:12px">No MF entries yet — add below</div>`}
 
-      <!-- Add Entry Form -->
       <div style="background:#060E18;border-top:2px solid #18263A;padding:16px 20px">
         <div style="font-size:11px;font-weight:600;color:#60778A;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">+ Add MF Purchase</div>
         <div style="display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr 1fr auto;gap:10px;align-items:flex-end">
@@ -1740,28 +1659,12 @@ function renderPortfolio(){
       out+=`<div style="background:linear-gradient(135deg,#130800,#1C0E00);border:1px solid #92400e;border-radius:16px;padding:22px;margin-bottom:20px">
         <div style="font-size:17px;font-weight:700;color:#FCD34D;margin-bottom:10px">🔐 Access Denied — HTTP 403</div>
         ${msg?`<div class="mono" style="font-size:11px;color:#D97706;background:#0a0500;padding:8px 12px;border-radius:8px;margin-bottom:14px;word-break:break-all">${msg}</div>`:""}
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
-          <div style="background:#0a0500;border:1px solid rgba(120,53,15,.4);border-radius:10px;padding:14px">
-            <div style="font-size:13px;font-weight:700;color:#FCD34D;margin-bottom:6px">⏰ Token Expired</div>
-            <div style="font-size:12px;color:#92400e;line-height:1.7;margin-bottom:10px">Dhan tokens expire every 24h. Auto-renew if token is still active, or generate a fresh one.</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn btn-sm" style="background:linear-gradient(135deg,#312e81,#4338ca);color:#c7d2fe;border:none"
-                onclick="renewToken()" ${S.renewingToken?"disabled":""}>
-                ${S.renewingToken?`<span class="spin">⟳</span>`:"⟳"} Auto-Renew
-              </button>
-              <button class="btn btn-sm btn-ghost" onclick="window.open('https://web.dhan.co/profile/api-access','_blank')">🔑 Get New Token</button>
-            </div>
-          </div>
-          <div style="background:#0a0500;border:1px solid rgba(120,53,15,.4);border-radius:10px;padding:14px">
-            <div style="font-size:13px;font-weight:700;color:#FCD34D;margin-bottom:6px">🌐 IP Blocked</div>
-            <div style="font-size:12px;color:#92400e;line-height:1.7;margin-bottom:10px">If your API app has a fixed IP whitelist, requests from other IPs get 403.</div>
-            <button class="btn btn-sm btn-ghost" onclick="window.open('https://my.dhan.co','_blank')">🔗 Manage IP</button>
-          </div>
-        </div>
-        <div style="font-size:12px;color:#78350f;line-height:1.9">
-          <strong style="color:#D97706">Other causes:</strong> extra whitespace in token · Client ID mismatch · API access not enabled at my.dhan.co → Profile → DhanHQ APIs
-        </div>
         <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <button class="btn btn-sm" style="background:linear-gradient(135deg,#312e81,#4338ca);color:#c7d2fe;border:none"
+            onclick="renewToken()" ${S.renewingToken?"disabled":""}>
+            ${S.renewingToken?`<span class="spin">⟳</span>`:"⟳"} Auto-Renew
+          </button>
+          <button class="btn btn-sm btn-ghost" onclick="window.open('https://web.dhan.co/profile/api-access','_blank')">🔑 Get New Token</button>
           <button class="btn btn-ghost btn-sm" onclick="switchTab('settings')">⚙️ Edit Credentials</button>
           <button class="btn btn-ghost btn-sm" onclick="fetchPortfolio(true)">🎭 Demo</button>
           <button class="btn btn-ghost btn-sm" onclick="S.portfolioError=null;render()">✕ Dismiss</button>
@@ -1778,13 +1681,13 @@ function renderPortfolio(){
     }
   }
 
-  // Single column: ETF holdings, then MF below
   if(S.etfHoldings.length&&!S.portfolioLoading){
     const inv=totalInvested(),cur=totalCurrent(),pnl=totalPnL(),pct=totalPnLPct();
     const s30=S.snap30,pct30=S.thirtyDayPnLPct,sip=sipTotal();
     if(S.isDemo)out+=`<div style="margin-bottom:14px;padding:8px 14px;background:#1a0f00;border:1px solid #78350f;border-radius:8px;font-size:12px;color:#D97706;display:inline-flex;align-items:center;gap:8px">🎭 Demo Mode — simulated data</div>`;
     const mfInvS=MF_PORTFOLIO.reduce((s,p)=>s+mfTotalInvested(p.isin),0);
     const mfCurS=MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||mfTotalInvested(p.isin)||0),0);
+    const mfCur2=MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||0),0);
     const grandCur=cur+mfCurS, grandInv=inv+mfInvS;
     const grandPct=grandInv>0?((grandCur-grandInv)/grandInv)*100:0;
     out+=`<div class="grid-4">
@@ -1813,7 +1716,7 @@ function renderPortfolio(){
       <div class="htable-hdr"><div>Instrument</div><div style="text-align:right">${S.trackingStartDate?"Tracked":"Qty"}</div>
         <div style="text-align:right" class="hcol3">Avg Cost${S.trackingStartDate?" ✦":""}</div><div style="text-align:right" class="hcol4">LTP</div>
         <div style="text-align:right">Curr. Value</div><div style="text-align:right">P&L${S.trackingStartDate?" ✦":""}</div></div>`;
-    // Render each strategy ETF row
+
     PORTFOLIO.forEach(p=>{
       const isMF = p.type==="MF";
       const h = S.etfHoldings.find(e=>
@@ -1822,16 +1725,15 @@ function renderPortfolio(){
         (e.isin||"").toUpperCase()===p.isin.toUpperCase()
       );
 
-      // ── MF row: show real data from mfHoldings entries ─────────────────────
       if(isMF){
         const entries = mfEntries(p.isin);
         const nav     = S.mfNavs[p.isin];
         const totalU  = mfTotalUnits(p.isin);
-        const totalInv= mfTotalInvested(p.isin);
+        const totalInv2= mfTotalInvested(p.isin);
         const avgN    = mfAvgNav(p.isin);
         const cv      = mfCurrentValue(p.isin);
-        const pnl     = mfPnL(p.isin);
-        const pct     = mfPnLPct(p.isin);
+        const pnl2    = mfPnL(p.isin);
+        const pct2    = mfPnLPct(p.isin);
         const hasData = entries.length>0;
         const isOpen  = S.expandedTicker===p.ticker;
 
@@ -1848,7 +1750,6 @@ function renderPortfolio(){
                   ${hasData?`<span class="badge" style="font-size:9px;padding:2px 5px;background:#1a0f00;border:1px solid #92400e;color:#FFB74D">${entries.length} entr${entries.length!==1?"ies":"y"}</span>`:""}
                 </div>
                 <div style="font-size:11px;color:#60778A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px">${p.instrument}</div>
-                ${!hasData?`<button class="btn btn-amber btn-sm" style="font-size:10px;padding:3px 8px;margin-top:3px" onclick="event.stopPropagation();switchTab('portfolio');setTimeout(()=>{const el=document.getElementById('mf-units-${p.isin}');if(el)el.scrollIntoView({behavior:'smooth'});},100)">+ Add entry</button>`:""}
               </div>
             </div>
             <div style="text-align:right">
@@ -1861,12 +1762,12 @@ function renderPortfolio(){
               ${nav?`<span class="mono" style="font-size:13px;font-weight:600;color:${nav.nav>avgN?"#4ADE80":nav.nav<avgN?"#F87171":"#D8E3EF"}">₹${nav.nav.toFixed(3)}</span>`:`<span style="font-size:11px;color:#40556A">NAV?</span>`}
             </div>
             <div style="text-align:right">
-              ${cv!==null?`<span class="mono" style="font-size:14px;font-weight:600;color:#4FC3F7">${fmtC(cv)}</span>`:`<span style="color:#40556A">${hasData?fmtC(totalInv)+" (cost)":"—"}</span>`}
+              ${cv!==null?`<span class="mono" style="font-size:14px;font-weight:600;color:#4FC3F7">${fmtC(cv)}</span>`:`<span style="color:#40556A">${hasData?fmtC(totalInv2)+" (cost)":"—"}</span>`}
             </div>
             <div style="text-align:right">
-              ${pnl!==null
-                ?`<div class="mono" style="font-size:13px;font-weight:700;color:${pnlColor(pct)}">${pnl>=0?"+":"−"}${fmtC(Math.abs(pnl))}</div>
-                  <span class="badge" style="background:${pnlBg(pct)};border:1px solid ${pnlBorder(pct)};color:${pnlColor(pct)};margin-top:3px;display:inline-block">${fmtP(pct)}</span>`
+              ${pnl2!==null
+                ?`<div class="mono" style="font-size:13px;font-weight:700;color:${pnlColor(pct2)}">${pnl2>=0?"+":"−"}${fmtC(Math.abs(pnl2))}</div>
+                  <span class="badge" style="background:${pnlBg(pct2)};border:1px solid ${pnlBorder(pct2)};color:${pnlColor(pct2)};margin-top:3px;display:inline-block">${fmtP(pct2)}</span>`
                 :`<span style="color:#40556A">${hasData?"Load NAV":"—"}</span>`}
             </div>
           </div>
@@ -1886,25 +1787,21 @@ function renderPortfolio(){
               <div style="font-size:10px;color:#40556A;text-transform:uppercase;padding-top:3px">Total</div>
               <div class="mono" style="text-align:right;font-size:14px;font-weight:700;color:#FFB74D">${totalU.toFixed(4)}</div>
               <div class="mono" style="text-align:right;font-size:12px;color:#60778A">₹${avgN.toFixed(4)} avg</div>
-              <div class="mono" style="text-align:right;font-size:14px;font-weight:700;color:#FFB74D">${fmtC(totalInv)}</div>
+              <div class="mono" style="text-align:right;font-size:14px;font-weight:700;color:#FFB74D">${fmtC(totalInv2)}</div>
             </div>
           </div>`:""}
         </div>`;
         return;
       }
 
-      // ── ETF not held ──────────────────────────────────────────────────────
       if(!h){
-        const isLegacy=p.legacy;
         out+=`<div class="htable-row" style="opacity:0.30">
           <div style="display:flex;align-items:center;gap:10px;padding-left:14px">
             <span style="font-size:20px">${p.icon}</span>
             <div>
               <div class="mono" style="font-size:13px;font-weight:700;color:${p.color}">${p.ticker}</div>
               <div style="font-size:11px;color:#60778A">${p.instrument.slice(0,38)}</div>
-              <span class="badge badge-dim" style="font-size:9px;padding:2px 6px;margin-top:3px">
-                ${isLegacy?"Not in account":"Not yet held"}
-              </span>
+              <span class="badge badge-dim" style="font-size:9px;padding:2px 6px;margin-top:3px">Not yet held</span>
             </div>
           </div>
           <div style="text-align:right;color:#40556A">—</div>
@@ -1918,7 +1815,6 @@ function renderPortfolio(){
         return;
       }
 
-      // ── Held but not purchased since tracking date ────────────────────────
       if(h.notTracked){
         out+=`<div style="border-bottom:1px solid #0A1520">
           <div class="htable-row" style="opacity:0.30">
@@ -1942,19 +1838,14 @@ function renderPortfolio(){
         return;
       }
 
-      // ── Normal held ETF row ───────────────────────────────────────────────
       const pc=pnlColor(h.pnlPct), pb=pnlBg(h.pnlPct), pbr=pnlBorder(h.pnlPct);
       const up        = h.ltp > h.avgCostPrice;
-      const isLegacy  = !!p.legacy;
       const hasTrades = !!(h.trades && h.trades.length > 0);
       const isOpen    = S.expandedTicker === p.ticker;
 
       out += `<div style="border-bottom:1px solid #111D2E">
-
-        <div class="htable-row"
-             style="${isLegacy?"background:rgba(79,195,247,0.02);":""}${hasTrades?"cursor:pointer;":""}"
+        <div class="htable-row" style="${hasTrades?"cursor:pointer;":""}"
              onclick="${hasTrades?"toggleTicker('"+p.ticker+"')":""}">
-
           <div style="display:flex;align-items:center;gap:8px">
             <span style="width:14px;text-align:center;flex-shrink:0;color:#4FC3F7;font-size:13px">
               ${hasTrades ? (isOpen ? "▾" : "▸") : ""}
@@ -1963,14 +1854,12 @@ function renderPortfolio(){
             <div style="min-width:0">
               <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
                 <span class="mono" style="font-size:13px;font-weight:700;color:${p.color}">${p.ticker}</span>
-                ${isLegacy ? `<span class="badge badge-dim" style="font-size:9px;padding:2px 4px">legacy</span>` : ""}
                 ${hasTrades ? `<span class="badge" style="font-size:9px;padding:2px 5px;background:#071a07;border:1px solid #14532d;color:#6EE7B7">${h.tradeCount} trade${h.tradeCount!==1?"s":""}</span>` : ""}
               </div>
               <div style="font-size:11px;color:#60778A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${p.instrument}</div>
               <span class="badge" style="background:${p.color}12;color:${p.color};padding:2px 6px;font-size:10px;margin-top:3px;display:inline-block">${p.category}</span>
             </div>
           </div>
-
           <div style="text-align:right">
             <div class="mono" style="font-size:14px;font-weight:600">${fmt(h.qty)}</div>
             <div style="font-size:10px;color:#40556A">${h.fromTrades?"tracked":"units"}</div>
@@ -2010,11 +1899,9 @@ function renderPortfolio(){
             <div class="mono" style="text-align:right;font-size:14px;font-weight:700;color:#4FC3F7">${fmtC(h.investedValue)}</div>
           </div>
         </div>` : ""}
-
       </div>`;
     });
 
-    // ── Other holdings (not part of strategy — collapsible, NOT in totals) ──
     if(S.unmatchedHoldings?.length){
       const othInv = S.unmatchedHoldings.reduce((s,h)=>s+h.qty*h.avgCostPrice,0);
       const othCur = S.unmatchedHoldings.reduce((s,h)=>s+h.qty*(h.ltp||h.avgCostPrice),0);
@@ -2056,13 +1943,11 @@ function renderPortfolio(){
         <span class="badge" style="background:${pnlBg(pct)};border:1px solid ${pnlBorder(pct)};color:${pnlColor(pct)};margin-top:4px">${fmtP(pct)}</span>
       </div></div></div>`;
 
-    // ── MUTUAL FUND SECTION ──────────────────────────────────────────
-
-    // SIP banner
+    const mfCur2b=MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||0),0);
     out+=`<div class="sip-banner" style="margin-top:16px">
       <div>
         <div class="mono" style="font-size:12px;color:#40556A;margin-bottom:6px">
-          ETF ${fmtC(cur)} + MF ${fmtC(mfCur2)} = <strong style="color:#4FC3F7">${fmtC(grandCur)}</strong>
+          ETF ${fmtC(cur)} + MF ${fmtC(mfCur2b)} = <strong style="color:#4FC3F7">${fmtC(grandCur)}</strong>
           ${grandInv>0?` · P&L <strong style="color:${pnlColor(grandPct)}">${fmtP(grandPct)}</strong>`:""}
         </div>
         <div class="serif" style="font-size:26px;color:#4FC3F7">${fmtC(sip)} <span style="font-size:14px;color:#60778A">SIP this month</span></div>
@@ -2176,28 +2061,24 @@ function renderExecute(){
   let out=`<div class="anim-fade">
     <div class="card" style="margin-bottom:18px">
       <div class="section-title">Order Execution Mode</div>
-
-      <!-- MF note banner -->
       <div style="padding:12px 14px;background:linear-gradient(135deg,#130A00,#1C0F00);border:1px solid #78350f;border-radius:10px;margin-bottom:16px;font-size:12px;color:#D97706;line-height:1.7">
         ⚠️ <strong>Portfolio mix:</strong>
         <strong style="color:#6EE7B7">2 Mutual Funds</strong> (UTI MQ100, PPFCF) and
         <strong style="color:#4FC3F7">4 ETFs</strong> (NIFTYBEES, MON100, GOLDBEES, SILVERBEES).<br>
-        <strong>Mutual Funds</strong> cannot be ordered via the stock API — they must be purchased through
-        <a href="https://dhan.co/mutual-funds/" target="_blank" style="color:#FCD34D">Dhan MF platform</a> or the app.
-        Only ETFs support Direct API mode.
+        <strong>Mutual Funds</strong> cannot be ordered via the stock API — use
+        <a href="https://dhan.co/mutual-funds/" target="_blank" style="color:#FCD34D">Dhan MF platform</a>.
       </div>
-
       <div style="display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap">
         <div class="mode-card ${S.orderMode==="app"?"active-app":""}" onclick="S.orderMode='app';render()">
           <div style="font-size:22px;margin-bottom:6px">📱</div>
           <div style="font-size:14px;font-weight:600;color:${S.orderMode==="app"?"#4FC3F7":"#D8E3EF"}">Dhan App / Web</div>
-          <div style="font-size:12px;color:#60778A;margin-top:4px">Open Dhan with pre-filled symbol (ETFs) or MF platform (funds)</div>
+          <div style="font-size:12px;color:#60778A;margin-top:4px">Open Dhan with pre-filled symbol</div>
         </div>
         <div class="mode-card ${S.orderMode==="direct"?"active-api":""}" onclick="S.orderMode='direct';render()">
           <div style="font-size:22px;margin-bottom:6px">⚡</div>
           <div style="font-size:14px;font-weight:600;color:${S.orderMode==="direct"?"#B87200":"#D8E3EF"}">Direct API — ETFs only</div>
           <div style="font-size:12px;color:#60778A;margin-top:4px">
-            Place via Dhan REST API (ETFs only) — requires proxy + credentials
+            Place via Dhan REST API — requires proxy + credentials
             ${S.dhanEnv==="sandbox"?`<br><strong style="color:#D97706">🧪 Sandbox</strong>`:""}
           </div>
         </div>
@@ -2205,9 +2086,6 @@ function renderExecute(){
       <div style="padding:12px;background:#090E18;border-radius:10px;border:1px solid #18263A;font-size:13px;color:#60778A">
         SIP: <strong class="mono" style="color:#4FC3F7">${fmtC(sip)}</strong>
         <span style="margin-left:8px;font-size:12px">(30-Day P&L: ${s30?fmtP(pct30):"no snapshot"})</span>
-        ${S.orderMode==="direct"&&!S.proxyActive?`<div style="margin-top:8px;color:#F87171;font-size:12px">⚠️ Proxy not active — ETF orders will fail. Enable in Settings.</div>`:""}
-        ${S.orderMode==="direct"&&ETF_PORTFOLIO.filter(p=>!p.securityId).length?
-          `<div style="margin-top:8px;color:#FCD34D;font-size:12px">⚠️ Some ETF security IDs unknown — <button class="btn btn-ghost btn-sm" style="padding:3px 9px;font-size:11px" onclick="lookupSecurityIds()">🔍 Lookup now</button></div>`:""}
       </div>
     </div>`;
 
@@ -2228,8 +2106,7 @@ function renderExecute(){
             <span class="mono" style="color:${p.color}">${p.ticker}</span>
             <span style="margin:0 6px;color:#18263A">|</span>${isMF?"BSE StarMF / Dhan MF":"NSE · CNC · MARKET"} · ${p.weight}%
           </div>
-          ${isMF?"":(!hasSecId&&S.orderMode==="direct"?`<div style="font-size:11px;color:#FCD34D;margin-top:2px">⚠️ Security ID unknown — run Lookup in Settings</div>`:`<div style="font-size:11px;color:#40556A;margin-top:2px">Security ID: <span class="mono">${p.securityId||"—"}</span> · ISIN: ${p.isin}</div>`)}
-          ${isMF?`<div style="font-size:11px;color:#40556A;margin-top:2px">ISIN: ${p.isin} · ${p.amc||""}</div>`:""}
+          ${isMF?"":`<div style="font-size:11px;color:#40556A;margin-top:2px">Security ID: <span class="mono">${p.securityId||"—"}</span> · ISIN: ${p.isin}</div>`}
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:14px">
@@ -2239,11 +2116,10 @@ function renderExecute(){
             ? `<button class="btn btn-blue" onclick="window.open('${p.dhanMFUrl||"https://dhan.co/mutual-funds/"}','_blank')">📱 Invest MF</button>`
             : `<button class="btn btn-blue" onclick="openDhanApp(PORTFOLIO.find(x=>x.id==='${p.id}'))">📱 Open ETF</button>`
           : isMF
-            ? `<button class="btn btn-ghost btn-sm" onclick="window.open('${p.dhanMFUrl||"https://dhan.co/mutual-funds/"}','_blank')" title="MFs cannot be ordered via stock API — open Dhan MF platform">🏦 MF Platform</button>`
+            ? `<button class="btn btn-ghost btn-sm" onclick="window.open('${p.dhanMFUrl||"https://dhan.co/mutual-funds/"}','_blank')">🏦 MF Platform</button>`
             : `<button class="btn ${canOrder?"btn-amber":"btn-ghost"}"
                 onclick="openOrderModal(PORTFOLIO.find(x=>x.id==='${p.id}'))"
-                ${(!canOrder||(!hasSecId&&!S.etfHoldings.find(h=>h.isin===p.isin)))?"disabled":""}
-                title="${!canOrder?"Connect+proxy required":!hasSecId?"Run security ID lookup first":""}">
+                ${(!canOrder)?"disabled":""}">
                 ⚡ Place Order</button>`}
       </div>
     </div>`;
@@ -2252,20 +2128,12 @@ function renderExecute(){
   out+=`<div class="btn-row" style="margin-top:18px">
     ${S.orderMode==="app"
       ?`<button class="btn btn-blue" style="padding:13px 24px" onclick="openAllDhanModal()">📱 Open All in Dhan / MF Platform</button>`
-      :`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <button class="btn btn-amber" style="padding:13px 24px" ${!(S.connected&&S.proxyActive)?"disabled":""}
-            onclick="allocatedAmounts().filter(p=>p.type==='ETF').forEach((p,i)=>setTimeout(()=>openOrderModal(p),i*400))">⚡ Execute All ETFs (${ETF_PORTFOLIO.length})</button>
-          <span style="font-size:12px;color:#60778A">MF instruments open separately in Dhan MF platform</span>
-        </div>`}
+      :`<button class="btn btn-amber" style="padding:13px 24px" ${!(S.connected&&S.proxyActive)?"disabled":""}
+          onclick="allocatedAmounts().filter(p=>p.type==='ETF').forEach((p,i)=>setTimeout(()=>openOrderModal(p),i*400))">⚡ Execute All ETFs (${ETF_PORTFOLIO.length})</button>`}
   </div>`;
 
-  // Session executed trades
   if(S.orders.length){
-    out+=`<div class="card" style="margin-top:22px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:8px">
-        <div class="section-title" style="margin-bottom:0">Session Executed Trades</div>
-        <div style="font-size:11px;color:#40556A">Charges from Dhan tradebook</div>
-      </div>`;
+    out+=`<div class="card" style="margin-top:22px"><div class="section-title">Session Executed Trades</div>`;
     S.orders.forEach(o=>{
       const c=o.charges,loading=o.chargesLoading;
       out+=`<div style="border:1px solid #18263A;border-radius:14px;overflow:hidden;margin-bottom:12px">
@@ -2273,10 +2141,10 @@ function renderExecute(){
           <div style="display:flex;align-items:center;gap:10px">
             <span style="font-size:22px">${o.icon||"📊"}</span>
             <div><div style="font-size:13px;font-weight:700">${o.instrument}</div>
-              <div style="display:flex;align-items:center;gap:8px;margin-top:3px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:8px;margin-top:3px">
                 <span class="mono" style="font-size:11px;color:#40556A">${o.id}</span>
                 <span style="font-size:11px;color:#40556A">· ${o.time}</span>
-                <span class="badge badge-green" style="padding:2px 8px;font-size:10px">✓ ${o.status}</span>
+                <span class="badge badge-green" style="font-size:10px">✓ ${o.status}</span>
               </div></div>
           </div>
           <div style="text-align:right">
@@ -2284,82 +2152,35 @@ function renderExecute(){
             ${o.tradedPrice?`<div style="font-size:11px;color:#60778A;margin-top:2px">@ ${fmtC(o.tradedPrice)} × ${o.tradedQty||1}</div>`:""}
           </div>
         </div>
-        ${loading?`<div style="padding:18px;background:#090E18;display:flex;align-items:center;gap:12px;border-top:1px solid #18263A">
+        ${loading?`<div style="padding:18px;background:#090E18;border-top:1px solid #18263A;display:flex;align-items:center;gap:12px">
           <span class="spin" style="font-size:18px;color:#4FC3F7">⟳</span>
-          <div><div style="font-size:13px">Fetching charges…</div><div style="font-size:11px;color:#40556A;margin-top:3px">Trades settle in ~2–5s</div></div>
+          <div><div style="font-size:13px">Fetching charges…</div></div>
         </div>`:c?`<div style="padding:14px 18px;background:#090E18;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;border-top:1px solid #18263A" class="charges-grid">
-          ${[["STT",c.stt,"Securities Transaction Tax"],["Exch. Charges",c.exchCharge,"NSE charges"],
-             ["SEBI Tax",c.sebi,"Regulatory fee"],["Stamp Duty",c.stamp,"State stamp"],
-             ["GST / Svc Tax",c.gst,"On brokerage & exch"],["Brokerage",c.brokerage,"₹0 on ETF delivery"]
-          ].map(([l,v,n])=>`<div style="padding:10px 12px;background:#0D1520;border-radius:8px;border:1px solid #18263A30">
-            <div style="font-size:10px;color:#40556A;text-transform:uppercase;letter-spacing:.6px;margin-bottom:5px">${l}</div>
+          ${[["STT",c.stt],["Exch",c.exchCharge],["SEBI",c.sebi],["Stamp",c.stamp],["GST",c.gst],["Brokerage",c.brokerage]].map(([l,v])=>`
+          <div style="padding:10px 12px;background:#0D1520;border-radius:8px;border:1px solid #18263A30">
+            <div style="font-size:10px;color:#40556A;text-transform:uppercase;margin-bottom:5px">${l}</div>
             <div class="mono" style="font-size:14px;font-weight:600;color:${v===0?"#4ADE80":"#F87171"}">${v===0?"Free":"−"+fmtC(v)}</div>
-            <div style="font-size:10px;color:#2A3F5C;margin-top:3px">${n}</div>
           </div>`).join("")}
-        </div>
-        <div style="padding:12px 18px;background:#0B1926;border-top:1px solid #18263A;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div style="font-size:12px;color:#60778A">
-            Trade <span class="mono" style="color:#4FC3F7">${fmtC(o.amount)}</span>
-            + Charges <span class="mono" style="color:#F87171">${fmtC(c.total)}</span>
-            = <strong class="mono" style="color:#D8E3EF;font-size:14px">${fmtC(o.amount+c.total)}</strong>
-          </div><span style="font-size:11px;color:#40556A">Source: Dhan tradebook</span>
-        </div>`:`<div style="padding:14px 18px;background:#090E18;border-top:1px solid #18263A;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div style="font-size:12px;color:#60778A">Charges not yet available — retry shortly</div>
-          <button class="btn btn-ghost btn-sm" onclick="(async()=>{
-            const idx=S.orders.findIndex(o=>o.id==='${o.id}');if(idx===-1)return;
-            S.orders[idx].chargesLoading=true;render();
-            const c=await fetchChargesForOrder('${o.id}');
-            S.orders[idx].charges=c;S.orders[idx].chargesLoading=false;
-            if(c){S.orders[idx].tradedPrice=c.tradedPrice;S.orders[idx].tradedQty=c.tradedQty;}
-            render();showToast(c?'Charges loaded ✓':'Not in tradebook yet',c?'success':'error');
-          })()">⟳ Retry</button>
-        </div>`}
+        </div>`:`<div style="padding:14px 18px;background:#090E18;border-top:1px solid #18263A;font-size:12px;color:#60778A">Charges pending</div>`}
       </div>`;
     });
-    if(S.orders.length>1){
-      const wc=S.orders.filter(o=>o.charges),tt=S.orders.reduce((s,o)=>s+o.amount,0),tc=wc.reduce((s,o)=>s+o.charges.total,0);
-      out+=`<div style="padding:14px 18px;background:#0C1828;border-radius:12px;border:1px solid #1351A860;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-        <div><div style="font-size:11px;color:#40556A;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px">Session Summary</div>
-          <div class="mono" style="font-size:15px;color:#4FC3F7">${fmtC(tt)} invested${wc.length?` · <span style="color:#F87171">${fmtC(tc)} charges</span>`:" · charges pending"}</div></div>
-        <div style="text-align:right">
-          <div class="mono" style="font-size:18px;font-weight:700;color:#D8E3EF">${fmtC(tt+tc)}</div>
-          <div style="font-size:11px;color:#40556A">Total (${wc.length}/${S.orders.length} with charges)</div>
-        </div></div>`;
-    }
     out+=`</div>`;
   }
 
-  // Today's Orders from Dhan
   out+=`<div class="card" style="margin-top:22px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-      <div><div class="section-title" style="margin-bottom:0">📋 Today's Orders from Dhan</div>
-        <div style="font-size:12px;color:#60778A;margin-top:4px">All orders placed today via GET /v2/orders</div></div>
+      <div><div class="section-title" style="margin-bottom:0">📋 Today's Orders from Dhan</div></div>
       <button class="btn btn-blue btn-sm" onclick="fetchTodayOrders()" ${S.todayOrdersLoading?"disabled":""}>
         ${S.todayOrdersLoading?`<span class="spin">⟳</span> Syncing…`:"⟳ Sync from Dhan"}
       </button>
     </div>
-    ${S.todayOrdersError?`<div style="padding:12px;background:#180D00;border:1px solid #78350f;border-radius:10px;font-size:12px;color:#D97706;margin-bottom:12px">⚠️ ${S.todayOrdersError}</div>`:""}
     ${!S.todayOrders.length&&!S.todayOrdersLoading?`<div style="text-align:center;padding:28px 20px;color:#40556A">
       <div style="font-size:28px;margin-bottom:8px">📋</div>
-      <div style="font-size:13px">${S.connected?"Click ⟳ Sync to load orders from Dhan":"Connect to Dhan first"}</div>
+      <div style="font-size:13px">${S.connected?"Click ⟳ Sync to load today's orders":"Connect to Dhan first"}</div>
     </div>`:
-    S.todayOrders.length?`
-      ${(()=>{
-        const OK=["TRADED","PART_TRADED","EXECUTED","COMPLETE","FILLED","CONFIRMED","TRANSIT"];
-        const BAD=["REJECTED","CANCELLED","EXPIRED","FAILED"];
-        const filled=S.todayOrders.filter(o=>OK.includes((o.orderStatus||"").toUpperCase())).length;
-        const bad=S.todayOrders.filter(o=>BAD.includes((o.orderStatus||"").toUpperCase())).length;
-        const pend=S.todayOrders.length-filled-bad;
-        return `<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-          <span class="badge badge-green">✓ ${filled} Filled</span>
-          ${pend?`<span class="badge badge-blue">⏳ ${pend} Pending</span>`:""}
-          ${bad?`<span class="badge badge-red">✕ ${bad} Rejected</span>`:""}
-          <span class="badge badge-dim">${S.todayOrders.length} Total</span>
-        </div>`;
-      })()}
-      <div style="overflow-x:auto">
+    S.todayOrders.length?`<div style="overflow-x:auto">
       <table class="ord-table"><thead><tr>
-        <th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Status</th><th>Reason</th>
+        <th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Status</th>
       </tr></thead><tbody>
         ${S.todayOrders.map(o=>{
           const st=(o.orderStatus||"").toUpperCase();
@@ -2367,15 +2188,13 @@ function renderExecute(){
           const BAD=["REJECTED","CANCELLED","EXPIRED","FAILED"];
           const chipCls=OK.includes(st)?"os os-ok":BAD.includes(st)?"os os-bad":"os os-pend";
           const t=(o.exchangeTime||o.updateTime||o.createTime||"").split(" ")[1]||"—";
-          const reason=BAD.includes(st)?(o.omsErrorDescription||o.remarks||""):"";
           return `<tr>
-            <td class="mono" style="color:#60778A;font-size:11px;white-space:nowrap">${t}</td>
+            <td class="mono" style="font-size:11px;color:#60778A">${t}</td>
             <td style="font-weight:600">${o.tradingSymbol||"—"}</td>
             <td style="font-weight:700;color:${o.transactionType==="BUY"?"#4ADE80":"#F87171"}">${o.transactionType||"—"}</td>
-            <td class="mono">${o.filledQty||o.tradedQuantity||"0"}/${o.quantity||"—"}</td>
-            <td class="mono">${o.avgTradedPrice?fmtC(o.avgTradedPrice):o.price?fmtC(o.price):"MKT"}</td>
+            <td class="mono">${o.filledQty||"0"}/${o.quantity||"—"}</td>
+            <td class="mono">${o.avgTradedPrice?fmtC(o.avgTradedPrice):"MKT"}</td>
             <td><span class="${chipCls}">${st}</span></td>
-            <td style="font-size:11px;color:#F87171;max-width:120px">${reason.slice(0,50)}</td>
           </tr>`;
         }).join("")}
       </tbody></table></div>`:""}
@@ -2413,29 +2232,17 @@ function renderHistory(){
 function renderSettings(){
   const snaps=S.snapshots,s30=S.snap30,isSandbox=S.dhanEnv==="sandbox";
   return `<div class="anim-fade" style="display:flex;flex-direction:column;gap:22px">
-
-    <!-- Credentials + Proxy -->
     <div class="grid-2">
-
-      <!-- Credentials card -->
       <div class="card">
         <div class="section-title">Dhan API Credentials</div>
         <div class="gap-form">
-
-          <!-- Environment toggle -->
           <div>
             <label class="inp-label" style="margin-bottom:8px">Trading Environment</label>
             <div class="env-toggle">
               <button class="env-opt ${!isSandbox?"active-prod":""}" onclick="setEnv('production')">🏦 Production</button>
               <button class="env-opt ${isSandbox?"active-sand":""}" onclick="setEnv('sandbox')">🧪 Sandbox</button>
             </div>
-            <div style="font-size:11px;color:#40556A;margin-top:6px;line-height:1.6">
-              ${isSandbox
-                ?"<strong style='color:#D97706'>Sandbox:</strong> Uses sandbox.dhan.co — no real orders. Get sandbox token at my.dhan.co → DhanHQ APIs → Sandbox."
-                :"<strong style='color:#6EE7B7'>Production:</strong> Real account at api.dhan.co — real orders and real money."}
-            </div>
           </div>
-
           <div>
             <label class="inp-label">Client ID</label>
             <input class="inp" type="text" placeholder="Your Dhan Client ID" value="${S.clientId}"
@@ -2446,51 +2253,28 @@ function renderSettings(){
             <input class="inp" type="password" placeholder="Paste your access token" value="${S.apiKey}"
               oninput="S.apiKey=this.value;localStorage.setItem('dhan_api_key',this.value)">
           </div>
-          <div class="info-box">
-            <div style="color:#4FC3F7;font-weight:600;margin-bottom:6px">How to get credentials:</div>
-            <div>1. Login at <strong>my.dhan.co</strong> → Profile → DhanHQ Trading APIs</div>
-            <div>2. Create an app → copy <strong>Client ID + Access Token</strong></div>
-            <div>3. Enable <strong>Portfolio & Order Management</strong> permissions</div>
-            <div style="margin-top:6px;color:#D97706">⏰ Token expires every 24h — use Auto-Renew below</div>
-          </div>
           <div class="btn-row">
             <button class="btn btn-blue" style="flex:1;justify-content:center" onclick="connectDhan()">
-              ${S.connected?(isSandbox?"✓ Reconnect Sandbox":"✓ Reconnect"):(isSandbox?"🧪 Connect Sandbox":"Connect to Dhan")}
+              ${S.connected?"✓ Reconnect":"Connect to Dhan"}
             </button>
             <button class="btn btn-ghost" onclick="window.open('https://my.dhan.co','_blank')">🔗 Portal</button>
           </div>
           <button class="btn btn-sm" style="width:100%;justify-content:center;background:linear-gradient(135deg,#312E81,#4338CA);color:#C7D2FE;border:none"
             onclick="renewToken()" ${S.renewingToken?"disabled":""}>
-            ${S.renewingToken?`<span class="spin">⟳</span> Renewing…`:"⟳ Auto-Renew Token (if still active)"}
+            ${S.renewingToken?`<span class="spin">⟳</span> Renewing…`:"⟳ Auto-Renew Token"}
           </button>
-          ${S.connected?`<div style="padding:12px;background:#053D2F30;border-radius:10px;border:1px solid #059669;font-size:13px;color:#6EE7B7">
-            ✓ Connected · ${isSandbox?"🧪 Sandbox · sandbox.dhan.co":"🏦 Production · api.dhan.co"}
-          </div>`:""}
+          ${S.connected?`<div style="padding:12px;background:#053D2F30;border-radius:10px;border:1px solid #059669;font-size:13px;color:#6EE7B7">✓ Connected</div>`:""}
         </div>
       </div>
-
-      <!-- Proxy card -->
       <div class="card" style="border-color:${S.proxyActive?"#6366F1":"#18263A"}">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
           <div class="section-title" style="margin-bottom:0">Local CORS Proxy</div>
-          ${S.proxyActive
-            ?`<span class="badge badge-purple"><span style="width:6px;height:6px;border-radius:50%;background:#A5B4FC;display:inline-block;animation:pulse 2s infinite;margin-right:4px"></span>Active</span>`
-            :`<span class="badge badge-dim">Inactive</span>`}
+          ${S.proxyActive?`<span class="badge badge-purple">Active</span>`:`<span class="badge badge-dim">Inactive</span>`}
         </div>
         <div class="gap-form">
-          <div style="padding:13px;background:#090E18;border-radius:10px;border:1px solid #18263A;font-size:12px;color:#60778A;line-height:2">
-            <div style="color:#A5B4FC;font-weight:600;margin-bottom:6px">▶ Why you need the proxy:</div>
-            <div>Browsers block direct calls to api.dhan.co (CORS policy).</div>
-            <div>The proxy runs locally and forwards your calls server-to-server.</div>
-            <div style="margin-top:6px;padding-top:6px;border-top:1px solid #18263A;color:#A5B4FC;font-weight:600">▶ Quick setup:</div>
-            <div>1. Install <strong style="color:#D8E3EF">Node.js</strong> (nodejs.org · LTS)</div>
-            <div>2. Put <code style="color:#A5B4FC">dhan-proxy.js</code> + this HTML in the <strong style="color:#D8E3EF">same folder</strong></div>
-            <div>3. Run <code style="color:#FCD34D">node dhan-proxy.js</code> — browser opens automatically</div>
-            <div style="margin-top:6px;padding-top:6px;border-top:1px solid #18263A;color:#40556A">Keep the terminal open while using the app.</div>
-          </div>
           <div>
             <label class="inp-label">Proxy URL</label>
-            <input class="inp" type="text" placeholder="e.g. https://dhan-proxy-xxxx.onrender.com" value="${S.proxyUrl}"
+            <input class="inp" type="text" placeholder="http://localhost:8080" value="${S.proxyUrl}"
               oninput="S.proxyUrl=this.value;localStorage.setItem('proxy_url',this.value)">
           </div>
           <div class="btn-row">
@@ -2498,96 +2282,47 @@ function renderSettings(){
               onclick="testProxy()" ${S.proxyTesting?"disabled":""}>
               ${S.proxyTesting?`<span class="spin">⟳</span> Testing…`:"⚡ Test Connection"}
             </button>
-            <button class="btn btn-ghost btn-sm" onclick="lookupSecurityIds()" ${!S.proxyActive?"disabled":""} title="Fetch ETF security IDs from Dhan scrip master">
+            <button class="btn btn-ghost btn-sm" onclick="lookupSecurityIds()" ${!S.proxyActive?"disabled":""}>
               🔍 Lookup Security IDs
             </button>
-            ${S.proxyActive?`<button class="btn btn-ghost btn-sm" onclick="S.proxyActive=false;render();showToast('Proxy disabled','error')">Disable</button>`:""}
           </div>
-          <!-- ETF Security ID status -->
           ${ETF_PORTFOLIO.map(p=>`
             <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:#090E18;border-radius:7px;font-size:12px;border:1px solid #18263A">
-              <span><span style="font-size:14px">${p.icon}</span> <strong style="color:${p.color}">${p.ticker}</strong> <span style="color:#40556A">${p.isin}</span></span>
-              <span class="mono" style="color:${p.securityId?"#6EE7B7":"#F87171"}">${p.securityId?p.securityId:"Not fetched"}</span>
+              <span><span style="font-size:14px">${p.icon}</span> <strong style="color:${p.color}">${p.ticker}</strong></span>
+              <span class="mono" style="color:${p.securityId?"#6EE7B7":"#F87171"}">${p.securityId||"Not fetched"}</span>
             </div>`).join("")}
-          ${S.proxyActive
-            ?`<div style="padding:12px;background:#1E1B4B30;border-radius:10px;border:1px solid #6366F1;font-size:13px;color:#A5B4FC">
-                ✓ All API calls routed through <span class="mono">${S.proxyUrl}</span> → ${dhanHost()}
-              </div>`
-            :`<div style="padding:12px;background:#090E18;border-radius:10px;border:1px solid #18263A;font-size:12px;color:#40556A">
-                Not active — start dhan-proxy.js then click Test Connection.
-              </div>`}
         </div>
       </div>
     </div>
-
-    <!-- Diagnostics + Snapshots -->
     <div class="grid-2">
-
-      <!-- Live Request Diagnostics -->
       <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
           <div class="section-title" style="margin-bottom:0">🔬 Live Request Diagnostics</div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            ${S.proxyActive
-              ?`<span class="badge badge-purple" style="font-size:10px">via proxy → ${dhanHost()}</span>`
-              :`<span class="badge badge-red" style="font-size:10px">Proxy off</span>`}
-            <button class="btn btn-ghost btn-sm" onclick="S.reqLog=[];repaintReqLog()">Clear</button>
-          </div>
-        </div>
-        <div style="padding:9px 12px;background:#090E18;border-radius:8px;border:1px solid #18263A;margin-bottom:12px;font-size:11px;color:#40556A;line-height:1.7">
-          Every API call appears here in real-time with status, timing and error detail.
-          Use the quick-test buttons to verify connectivity without leaving Settings.
+          <button class="btn btn-ghost btn-sm" onclick="S.reqLog=[];repaintReqLog()">Clear</button>
         </div>
         <div id="req-log-content" style="max-height:340px;overflow-y:auto;font-size:11px">
           <div style="color:#40556A;padding:8px 0">No requests yet.</div>
         </div>
         <div class="btn-row" style="margin-top:14px;flex-wrap:wrap">
-          <button class="btn btn-ghost btn-sm" onclick="(async()=>{if(!S.apiKey){showToast('Set token first','error');return;}const r=await dhanApi('GET','/v2/fundlimit');showToast(r.ok?'Fund limit ✓ OK':'Failed: '+r.error,r.ok?'success':'error');})()">▶ /fundlimit</button>
-          <button class="btn btn-ghost btn-sm" onclick="(async()=>{if(!S.apiKey){showToast('Set token first','error');return;}const r=await dhanApi('GET','/v2/holdings');if(r.ok){const raw=r.data;const arr=Array.isArray(raw)?raw:(raw?.holdings||raw?.data||[]);const matched=arr.filter(h=>SYMBOL_MAP[(h.tradingSymbol||'').toUpperCase()]||ISIN_MAP[(h.isin||'').toUpperCase()]);showToast('Holdings: '+arr.length+' total · '+matched.length+' matched · '+arr.map(h=>h.tradingSymbol||h.isin||'?').join(','),matched.length>0?'success':'error');}else showToast('Failed: '+r.error,'error');})()">▶ /holdings debug</button>
-          <button class="btn btn-ghost btn-sm" onclick="(async()=>{if(!S.apiKey){showToast('Set token first','error');return;}const t=new Date().toISOString().slice(0,10);const r=await dhanApi('GET','/v2/orders');showToast(r.ok?'Orders ✓ ('+r.data?.length+')':'Failed: '+r.error,r.ok?'success':'error');})()">▶ /orders</button>
+          <button class="btn btn-ghost btn-sm" onclick="(async()=>{const r=await dhanApi('GET','/v2/fundlimit');showToast(r.ok?'Fund limit ✓':'Failed: '+r.error,r.ok?'success':'error');})()">▶ /fundlimit</button>
+          <button class="btn btn-ghost btn-sm" onclick="(async()=>{const r=await dhanApi('GET','/v2/holdings');if(r.ok){const arr=Array.isArray(r.data)?r.data:(r.data?.holdings||[]);showToast('Holdings: '+arr.length+' total',arr.length>0?'success':'error');}else showToast('Failed: '+r.error,'error');})()">▶ /holdings</button>
+          <button class="btn btn-ghost btn-sm" onclick="(async()=>{const r=await dhanApi('GET','/v2/orders');showToast(r.ok?'Orders ✓ ('+r.data?.length+')':'Failed: '+r.error,r.ok?'success':'error');})()">▶ /orders</button>
         </div>
       </div>
-
-      <!-- Right column: API info + Snapshots -->
       <div style="display:flex;flex-direction:column;gap:22px">
         <div class="card">
-          <div class="section-title">API Endpoints Used</div>
-          <div class="gap-form">
-            ${[{m:"GET",p:"/v2/holdings",d:"Portfolio holdings (ISIN-filtered)"},
-               {m:"POST",p:"/v2/marketfeed/ltp",d:"Last traded prices"},
-               {m:"POST",p:"/v2/orders",d:"Place buy order"},
-               {m:"GET",p:"/v2/orders",d:"Today's orders list"},
-               {m:"GET",p:"/v2/trades/{d}/{d}/0",d:"Tradebook — real charges"},
-               {m:"POST",p:"/v2/RenewToken",d:"Auto-renew access token"},
-               {m:"GET",p:"/v2/fundlimit",d:"Fund balance check"},
-            ].map(e=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#090E18;border-radius:8px;border:1px solid #18263A">
-              <span class="badge ${e.m==="GET"?"badge-green":"badge-blue"}" style="font-size:9px;padding:2px 7px">${e.m}</span>
-              <code style="font-size:11px;flex:1">${e.p}</code>
-            </div>
-            <div style="font-size:11px;color:#40556A;padding:0 10px 4px">${e.d}</div>`).join("")}
-          </div>
-        </div>
-        <div class="card">
           <div class="section-title">30-Day Snapshot Log</div>
-          <div class="gap-form">
-            <div style="padding:13px;background:#090E18;border-radius:10px;border:1px solid #18263A">
-              <div style="font-size:12px;color:#60778A;font-weight:600;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">
-                <span>📸 ${snaps.length} snapshots</span>
-                ${s30?`<span style="font-size:11px;color:#4ADE80">✓ Anchor: ${s30.date}</span>`:""}
-              </div>
-              ${!snaps.length
-                ?`<div style="font-size:12px;color:#40556A">No snapshots yet. Saved each time you fetch live data.</div>`
-                :`<div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
-                    ${snaps.slice(0,20).map(s=>{const isA=s30&&s30.date===s.date; return `<div class="snap-row ${isA?"anchor":""}">
-                      <span style="color:${isA?"#4FC3F7":"#60778A"}">${s.date}${isA?" ← anchor":""}</span>
-                      <span class="mono" style="color:${isA?"#4FC3F7":"#94A3B8"}">${fmtC(s.value)}</span>
-                    </div>`;}).join("")}
-                  </div>`}
-            </div>
-            <button class="btn btn-red btn-sm" onclick="if(confirm('Clear all stored data?')){localStorage.clear();S.apiKey='';S.clientId='';S.startDate='';S.proxyUrl=(location.protocol==="file:"?"http://localhost:8080":location.origin);S.dhanEnv='production';S.proxyActive=false;S.connected=false;S.history=[];S.etfHoldings=[];S.snapshots=[];S.snap30=null;S.thirtyDayPnLPct=0;S.lossPercent=0;S.reqLog=[];S.mfHoldings={};S.mfNavs={};render();showToast('All data cleared','error');}">
-              🗑️ Clear All Local Data
-            </button>
+          <div style="padding:13px;background:#090E18;border-radius:10px;border:1px solid #18263A">
+            <div style="font-size:12px;color:#60778A;font-weight:600;margin-bottom:10px">📸 ${snaps.length} snapshots ${s30?`· Anchor: ${s30.date}`:""}</div>
+            ${!snaps.length?`<div style="font-size:12px;color:#40556A">No snapshots yet.</div>`:`
+              <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
+                ${snaps.slice(0,20).map(s=>{const isA=s30&&s30.date===s.date; return `<div class="snap-row ${isA?"anchor":""}">
+                  <span style="color:${isA?"#4FC3F7":"#60778A"}">${s.date}${isA?" ← anchor":""}</span>
+                  <span class="mono" style="color:${isA?"#4FC3F7":"#94A3B8"}">${fmtC(s.value)}</span>
+                </div>`;}).join("")}
+              </div>`}
           </div>
+          <button class="btn btn-red btn-sm" style="margin-top:12px" onclick="if(confirm('Clear all data?')){localStorage.clear();location.reload();}">🗑️ Clear All Data</button>
         </div>
       </div>
     </div>
@@ -2607,7 +2342,7 @@ function render(){
     ${S.isDemo?`<span class="badge badge-amber">🎭 Demo</span>`:""}
     ${isSandbox?`<span class="badge badge-amber">🧪 SANDBOX</span>`:""}
     ${S.proxyActive
-      ?`<span class="badge badge-purple"><span style="width:6px;height:6px;border-radius:50%;background:#A5B4FC;display:inline-block;animation:pulse 2s infinite"></span>Proxy</span>`
+      ?`<span class="badge badge-purple"><span style="width:6px;height:6px;border-radius:50%;background:#A5B4FC;display:inline-block;animation:pulse 2s infinite;margin-right:4px"></span>Proxy</span>`
       :`<span class="badge badge-dim">No Proxy</span>`}
     ${S.connected
       ?`<span class="badge badge-green"><span class="live-dot"></span>${isSandbox?"Sandbox":"Dhan Live"}</span>`

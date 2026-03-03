@@ -1548,143 +1548,134 @@ function renderMFSection(){
   const mfPnLTot  = MF_PORTFOLIO.reduce((s,p)=>{const x=mfPnL(p.isin);return s+(x||0);},0);
   const mfPctTot  = totalMFInv>0?(mfPnLTot/totalMFInv)*100:0;
 
-  // All entries across both funds, sorted newest first, tagged with fund
   const allEntries = MF_PORTFOLIO.flatMap(p=>
     mfEntries(p.isin).map((e,i)=>({...e, isin:p.isin, ticker:p.ticker, color:p.color, idx:i}))
   ).sort((a,b)=>b.date.localeCompare(a.date));
 
-  let html=`<div>
-    <!-- Header -->
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-      <div>
-        <div style="font-size:15px;font-weight:700">🏦 Mutual Funds</div>
-        <div style="font-size:11px;color:#60778A;margin-top:2px">NAV · AMFI India</div>
+  let html=`<div style="margin-top:22px">
+    <div class="htable">
+      <!-- Header -->
+      <div class="htable-head">
+        <div style="font-size:14px;font-weight:600">🏦 Mutual Fund Holdings</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          ${anyNav?`<span style="font-size:11px;color:#40556A">AMFI · ${S.mfNavs[MF_PORTFOLIO.find(p=>S.mfNavs[p.isin])?.isin]?.date||""}</span>`:""}
+          <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="fetchAMFINavs()" ${!S.proxyActive||S.mfNavLoading?"disabled":""}>
+            ${S.mfNavLoading?`<span class="spin">⟳</span>`:"⟳"} Live NAV
+          </button>
+        </div>
       </div>
-      <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="fetchAMFINavs()" ${!S.proxyActive||S.mfNavLoading?"disabled":""}>
-        ${S.mfNavLoading?`<span class="spin">⟳</span>`:"⟳"} NAV
-      </button>
-    </div>
+      ${S.mfNavError?`<div style="padding:8px 16px;background:#180D00;border-bottom:1px solid #78350f;font-size:11px;color:#D97706">⚠️ ${S.mfNavError}</div>`:""}
 
-    ${S.mfNavError?`<div style="padding:8px 12px;background:#180D00;border:1px solid #78350f;border-radius:8px;font-size:11px;color:#D97706;margin-bottom:10px">⚠️ ${S.mfNavError}</div>`:""}
-
-    <!-- Per-fund summary pills -->
-    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
-      ${MF_PORTFOLIO.map(p=>{
-        const entries=mfEntries(p.isin), nav=S.mfNavs[p.isin];
-        const totalU=mfTotalUnits(p.isin), inv=mfTotalInvested(p.isin);
-        const cv=mfCurrentValue(p.isin), pnl=mfPnL(p.isin), pct=mfPnLPct(p.isin);
-        return `<div style="padding:10px 12px;background:#0A1018;border:1px solid ${p.color}25;border-radius:10px">
-          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
-            <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-size:18px">${p.icon}</span>
-              <div>
-                <div style="font-size:12px;font-weight:700;color:${p.color}">${p.ticker}</div>
-                <div style="font-size:10px;color:#40556A">${entries.length} entr${entries.length!==1?"ies":"y"} · ${totalU.toFixed(3)} units</div>
-              </div>
+      <!-- Fund summary strip -->
+      <div style="display:grid;grid-template-columns:${MF_PORTFOLIO.map(()=>'1fr').join(' ')};border-bottom:1px solid #18263A;background:#060C14">
+        ${MF_PORTFOLIO.map(p=>{
+          const nav=S.mfNavs[p.isin], totalU=mfTotalUnits(p.isin), inv=mfTotalInvested(p.isin);
+          const cv=mfCurrentValue(p.isin), pct=mfPnLPct(p.isin);
+          return `<div style="padding:12px 16px;border-right:1px solid #111D2E">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+              <span style="font-size:15px">${p.icon}</span>
+              <span class="mono" style="font-size:12px;font-weight:700;color:${p.color}">${p.ticker}</span>
+              <span class="badge badge-amber" style="font-size:9px;padding:1px 4px">MF</span>
             </div>
-            <div style="text-align:right">
-              ${nav?`<div style="font-size:11px;color:#60778A">NAV ₹${nav.nav.toFixed(3)}</div>`:""}
-              ${cv!==null
-                ?`<div class="mono" style="font-size:13px;font-weight:700;color:#4FC3F7">${fmtC(cv)}</div>`
-                :`<div class="mono" style="font-size:13px;color:#60778A">${inv?fmtC(inv)+" cost":"—"}</div>`}
-              ${pnl!==null?`<div style="font-size:11px;color:${pnlColor(pct)}">${pnl>=0?"+":"−"}${fmtC(Math.abs(pnl))} (${fmtP(pct)})</div>`:""}
+            <div style="font-size:10px;color:#40556A">${totalU.toFixed(3)} units · ${inv?fmtC(inv):"no entries"}</div>
+            ${nav?`<div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+              <span class="mono" style="font-size:13px;font-weight:700;color:#4FC3F7">${cv!==null?fmtC(cv):"—"}</span>
+              ${pct!==null?`<span class="badge" style="font-size:10px;background:${pnlBg(pct)};border:1px solid ${pnlBorder(pct)};color:${pnlColor(pct)}">${fmtP(pct)}</span>`:""}
             </div>
-          </div>
-        </div>`;
-      }).join("")}
-    </div>
+            <div style="font-size:10px;color:#40556A">NAV ₹${nav.nav.toFixed(4)}</div>`
+            :`<div style="font-size:11px;color:#40556A;margin-top:4px">NAV not loaded</div>`}
+          </div>`;
+        }).join("")}
+      </div>
 
-    <!-- Add Entry Form -->
-    <div style="background:#060E18;border:1px solid #18263A;border-radius:12px;padding:14px;margin-bottom:14px">
-      <div style="font-size:11px;font-weight:600;color:#60778A;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">+ Add Purchase</div>
-      <div style="margin-bottom:8px">
-        <label class="inp-label">Fund</label>
-        <select class="inp" id="mf-sel" style="padding:7px 10px;font-size:12px;width:100%">
-          ${MF_PORTFOLIO.map(p=>`<option value="${p.isin}">${p.ticker} — ${p.instrument.slice(0,30)}</option>`).join("")}
-        </select>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-        <div>
-          <label class="inp-label">Date</label>
-          <input class="inp" type="date" id="mf-date" value="${new Date().toISOString().slice(0,10)}" style="padding:7px 10px;font-size:12px;width:100%">
-        </div>
-        <div>
-          <label class="inp-label">Units purchased</label>
-          <input class="inp" type="number" step="0.001" min="0" id="mf-qty"
-            placeholder="e.g. 125.456" style="padding:7px 10px;font-size:12px;width:100%"
-            oninput="(()=>{const q=parseFloat(this.value||0),n=parseFloat(document.getElementById('mf-nav-inp').value||0);const a=document.getElementById('mf-amt');if(a)a.value=q&&n?(q*n).toFixed(2):''})()">
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
-        <div>
-          <label class="inp-label">Purchase NAV (₹)</label>
-          <input class="inp" type="number" step="0.0001" min="0" id="mf-nav-inp"
-            placeholder="e.g. 18.5000" style="padding:7px 10px;font-size:12px;width:100%"
-            oninput="(()=>{const q=parseFloat(document.getElementById('mf-qty').value||0),n=parseFloat(this.value||0);const a=document.getElementById('mf-amt');if(a)a.value=q&&n?(q*n).toFixed(2):''})()">
-        </div>
-        <div>
-          <label class="inp-label">Amount invested (₹)</label>
-          <input class="inp" type="number" step="0.01" min="0" id="mf-amt"
-            placeholder="auto" style="padding:7px 10px;font-size:12px;width:100%;background:#040A12;color:#4FC3F7;font-weight:600">
-        </div>
-      </div>
-      <button class="btn btn-amber" style="width:100%;font-size:13px;padding:9px" onclick="(()=>{
-        const isin=document.getElementById('mf-sel').value;
-        const date=document.getElementById('mf-date').value;
-        const u=parseFloat(document.getElementById('mf-qty').value||0);
-        const n=parseFloat(document.getElementById('mf-nav-inp').value||0);
-        const a=parseFloat(document.getElementById('mf-amt').value||0);
-        if(!isin||!u||!n){showToast('Select fund, enter units and NAV','error');return;}
-        addMFEntry(isin,date,u,n,a||u*n);
-        document.getElementById('mf-qty').value='';
-        document.getElementById('mf-nav-inp').value='';
-        document.getElementById('mf-amt').value='';
-      })()">+ Add Entry</button>
-    </div>
-
-    <!-- Entry log -->
-    ${allEntries.length?`
-    <div style="background:#040A12;border:1px solid #18263A;border-radius:12px;overflow:hidden">
-      <div style="display:grid;grid-template-columns:80px 1fr 70px 70px 80px 24px;padding:7px 12px;font-size:10px;color:#2A3F5C;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #0A1520">
-        <div>Date</div><div>Fund</div><div style="text-align:right">Units</div><div style="text-align:right">NAV</div><div style="text-align:right">Amount</div><div></div>
+      <!-- Entry log header -->
+      ${allEntries.length?`
+      <div class="htable-hdr" style="grid-template-columns:110px 90px 80px 1fr 1fr 28px">
+        <div>Date</div><div>Fund</div><div style="text-align:right">Units</div>
+        <div style="text-align:right">Pur. NAV</div><div style="text-align:right">Amount</div><div></div>
       </div>
       ${allEntries.map((e,i)=>`
-      <div style="display:grid;grid-template-columns:80px 1fr 70px 70px 80px 24px;padding:8px 12px;${i%2===0?"background:#040A12":"background:#060E18"};border-bottom:1px solid #080F1A;align-items:center">
-        <div class="mono" style="font-size:11px;color:#60778A">${e.date||"—"}</div>
-        <div style="display:flex;align-items:center;gap:5px">
-          <span class="mono" style="font-size:11px;font-weight:700;color:${e.color}">${e.ticker}</span>
-        </div>
-        <div class="mono" style="text-align:right;font-size:12px;color:#D8E3EF">${e.units.toFixed(3)}</div>
-        <div class="mono" style="text-align:right;font-size:12px;color:#94A3B8">₹${e.nav.toFixed(2)}</div>
-        <div class="mono" style="text-align:right;font-size:12px;font-weight:600;color:#FFB74D">${fmtC(e.amount)}</div>
+      <div class="htable-row" style="grid-template-columns:110px 90px 80px 1fr 1fr 28px;${i%2?"background:#060E18":""}">
+        <div class="mono" style="font-size:12px;color:#60778A">${e.date||"—"}</div>
+        <div><span class="mono" style="font-size:12px;font-weight:700;color:${e.color}">${e.ticker}</span></div>
+        <div class="mono" style="text-align:right;font-size:13px">${e.units.toFixed(3)}</div>
+        <div class="mono" style="text-align:right;font-size:13px;color:#94A3B8">₹${e.nav.toFixed(4)}</div>
+        <div class="mono" style="text-align:right;font-size:13px;font-weight:600;color:#FFB74D">${fmtC(e.amount)}</div>
         <div style="text-align:center">
-          <button onclick="if(confirm('Remove this entry?'))deleteMFEntry('${e.isin}',${e.idx})"
-            style="background:transparent;border:none;color:#2A3F5C;cursor:pointer;font-size:13px;padding:0;line-height:1;transition:color .15s"
+          <button onclick="if(confirm('Remove?'))deleteMFEntry('${e.isin}',${e.idx})"
+            style="background:transparent;border:none;color:#2A3F5C;cursor:pointer;font-size:13px;padding:0"
             onmouseover="this.style.color='#F87171'" onmouseout="this.style.color='#2A3F5C'">✕</button>
         </div>
       </div>`).join("")}
-      <!-- Total row -->
-      <div style="display:grid;grid-template-columns:80px 1fr 70px 70px 80px 24px;padding:9px 12px;background:#020508;border-top:1px solid #1a2535">
-        <div style="font-size:10px;color:#40556A;text-transform:uppercase;padding-top:2px">Total</div>
+      <div class="htable-foot" style="grid-template-columns:110px 90px 80px 1fr 1fr 28px">
+        <div style="font-size:11px;color:#60778A;grid-column:1/5">MF Total invested</div>
+        <div class="mono" style="text-align:right;font-size:14px;font-weight:700;color:#FFB74D">${fmtC(totalMFInv)}</div>
         <div></div>
-        <div></div>
-        <div></div>
-        <div class="mono" style="text-align:right;font-size:13px;font-weight:700;color:#FFB74D">${fmtC(totalMFInv)}</div>
-        <div></div>
-      </div>
-    </div>`:`
-    <div style="padding:20px;text-align:center;color:#2A3F5C;font-size:12px;background:#040A12;border:1px solid #18263A;border-radius:12px">
-      No entries yet — add your first MF purchase above
-    </div>`}
+      </div>`:`
+      <div style="padding:20px;text-align:center;color:#2A3F5C;font-size:12px">No MF entries yet — add below</div>`}
 
-    ${totalMFInv>0&&totalMFCur>0?`
-    <div style="margin-top:10px;padding:10px 14px;background:#0C1828;border-radius:10px;border:1px solid #1351A840;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-      <span class="mono" style="font-size:12px;color:#60778A">MF Total · ${fmtC(totalMFInv)} invested</span>
-      <div style="display:flex;align-items:center;gap:8px">
-        <span class="mono" style="font-size:14px;font-weight:700;color:#4FC3F7">${fmtC(totalMFCur)}</span>
-        <span class="badge" style="background:${pnlBg(mfPctTot)};border:1px solid ${pnlBorder(mfPctTot)};color:${pnlColor(mfPctTot)}">${fmtP(mfPctTot)}</span>
+      <!-- Add Entry Form -->
+      <div style="background:#060E18;border-top:2px solid #18263A;padding:16px 20px">
+        <div style="font-size:11px;font-weight:600;color:#60778A;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">+ Add MF Purchase</div>
+        <div style="display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr 1fr auto;gap:10px;align-items:flex-end">
+          <div>
+            <label class="inp-label">Fund</label>
+            <select class="inp" id="mf-sel" style="padding:7px 10px;font-size:12px;width:100%">
+              ${MF_PORTFOLIO.map(p=>`<option value="${p.isin}">${p.ticker} — ${p.instrument.slice(0,28)}</option>`).join("")}
+            </select>
+          </div>
+          <div>
+            <label class="inp-label">Date</label>
+            <input class="inp" type="date" id="mf-date" value="${new Date().toISOString().slice(0,10)}" style="padding:7px 10px;font-size:12px;width:100%">
+          </div>
+          <div>
+            <label class="inp-label">Units</label>
+            <input class="inp" type="number" step="0.001" min="0" id="mf-qty" placeholder="125.456"
+              style="padding:7px 10px;font-size:12px;width:100%"
+              oninput="(()=>{const q=parseFloat(this.value||0),a=parseFloat(document.getElementById('mf-amt').value||0);const ni=document.getElementById('mf-nav-inp');if(q&&a){ni.value=(a/q).toFixed(4);}else{const n=parseFloat(ni.value||0);const ai=document.getElementById('mf-amt');if(q&&n)ai.value=(q*n).toFixed(2);}})()">
+          </div>
+          <div>
+            <label class="inp-label">Amount (₹)</label>
+            <input class="inp" type="number" step="1" min="0" id="mf-amt" placeholder="5000"
+              style="padding:7px 10px;font-size:12px;width:100%"
+              oninput="(()=>{const q=parseFloat(document.getElementById('mf-qty').value||0),a=parseFloat(this.value||0);const ni=document.getElementById('mf-nav-inp');if(q&&a)ni.value=(a/q).toFixed(4);})()">
+          </div>
+          <div>
+            <label class="inp-label" style="color:#4FC3F7">NAV (auto)</label>
+            <input class="inp" type="number" step="0.0001" min="0" id="mf-nav-inp" placeholder="auto"
+              style="padding:7px 10px;font-size:12px;width:100%;background:#040A12;color:#4FC3F7;font-weight:600"
+              oninput="(()=>{const q=parseFloat(document.getElementById('mf-qty').value||0),n=parseFloat(this.value||0);const ai=document.getElementById('mf-amt');if(q&&n)ai.value=(q*n).toFixed(2);})()">
+          </div>
+          <button class="btn btn-amber" style="padding:8px 18px;font-size:13px" onclick="(()=>{
+            const isin=document.getElementById('mf-sel').value;
+            const date=document.getElementById('mf-date').value;
+            const u=parseFloat(document.getElementById('mf-qty').value||0);
+            const n=parseFloat(document.getElementById('mf-nav-inp').value||0);
+            const a=parseFloat(document.getElementById('mf-amt').value||0);
+            if(!isin||!u){showToast('Select fund and enter units','error');return;}
+            const nav=n||(u&&a?a/u:0);
+            const amt=a||(u*nav)||0;
+            if(!nav){showToast('Enter amount or NAV','error');return;}
+            addMFEntry(isin,date,u,nav,amt);
+            document.getElementById('mf-qty').value='';
+            document.getElementById('mf-nav-inp').value='';
+            document.getElementById('mf-amt').value='';
+          })()">+ Add</button>
+        </div>
+        <div style="font-size:10px;color:#2A3F5C;margin-top:7px">
+          Fill <b style="color:#60778A">Units + Amount</b> → NAV auto-derived · or <b style="color:#60778A">Units + NAV</b> → Amount auto-calculated
+        </div>
       </div>
-    </div>`:""}
+
+      ${totalMFInv>0?`
+      <div style="padding:12px 16px;background:#0A1420;border-top:1px solid #1351A840;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <span style="font-size:12px;color:#60778A">Total invested: <span class="mono" style="color:#FFB74D">${fmtC(totalMFInv)}</span></span>
+        <div style="display:flex;align-items:center;gap:8px">
+          ${totalMFCur>0?`<span class="mono" style="font-size:14px;font-weight:700;color:#4FC3F7">${fmtC(totalMFCur)}</span>`:""}
+          ${mfPnLTot&&totalMFCur>0?`<span class="badge" style="background:${pnlBg(mfPctTot)};border:1px solid ${pnlBorder(mfPctTot)};color:${pnlColor(mfPctTot)}">${fmtP(mfPctTot)}</span>`:""}
+        </div>
+      </div>`:""}
+    </div>
   </div>`;
   return html;
 }
@@ -1780,18 +1771,19 @@ function renderPortfolio(){
     }
   }
 
-  // Always render 2-col split — ETF left, MF right
-  out+=`<div style="display:grid;grid-template-columns:1.15fr 0.85fr;gap:20px;align-items:start" class="portfolio-split">`;
-  // ── LEFT COL: ETF ────────────────────────────────────────────────
-  out+=`<div>`;
+  // Single column: ETF holdings, then MF below
   if(S.etfHoldings.length&&!S.portfolioLoading){
     const inv=totalInvested(),cur=totalCurrent(),pnl=totalPnL(),pct=totalPnLPct();
     const s30=S.snap30,pct30=S.thirtyDayPnLPct,sip=sipTotal();
     if(S.isDemo)out+=`<div style="margin-bottom:14px;padding:8px 14px;background:#1a0f00;border:1px solid #78350f;border-radius:8px;font-size:12px;color:#D97706;display:inline-flex;align-items:center;gap:8px">🎭 Demo Mode — simulated data</div>`;
+    const mfInvS=MF_PORTFOLIO.reduce((s,p)=>s+mfTotalInvested(p.isin),0);
+    const mfCurS=MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||mfTotalInvested(p.isin)||0),0);
+    const grandCur=cur+mfCurS, grandInv=inv+mfInvS;
+    const grandPct=grandInv>0?((grandCur-grandInv)/grandInv)*100:0;
     out+=`<div class="grid-4">
-      ${[{lbl:"Current Value",val:fmtC(cur),c:"#4FC3F7",sub:fmtC(inv)+" invested"},
-         {lbl:"30-Day Prior",val:s30?fmtC(s30.value):"—",c:"#94A3B8",sub:s30?`as of ${s30.date}`:"Builds daily"},
-         {lbl:"30-Day P&L",val:s30?fmtP(pct30):"—",c:!s30?"#94A3B8":pct30>=0?"#4ADE80":"#F87171",sub:s30?(pct30<0?"⚡ Dip-boost ON":"In profit"):"No snapshot yet"},
+      ${[{lbl:"Total Portfolio",val:fmtC(grandCur),c:"#4FC3F7",sub:fmtC(grandInv)+" invested · "+fmtP(grandPct)+" P&L"},
+         {lbl:"ETF Value",val:fmtC(cur),c:"#6EE7B7",sub:fmtC(inv)+" invested"},
+         {lbl:"MF Value",val:mfCurS>0?fmtC(mfCurS):(mfInvS>0?fmtC(mfInvS)+" cost":"—"),c:"#FFB74D",sub:mfCurS>0?"live NAV":"add entries / load NAV"},
          {lbl:"SIP This Month",val:fmtC(sip),c:"#B87200",sub:pct30<0?`Dip-boosted (${pct30}%)`:"Base floor"},
       ].map(c=>`<div class="stat-card"><div class="stat-label">${c.lbl}</div><div class="stat-val" style="color:${c.c}">${c.val}</div><div style="font-size:12px;color:${c.c};margin-top:4px;opacity:.7">${c.sub}</div></div>`).join("")}
     </div>`;
@@ -2060,11 +2052,6 @@ function renderPortfolio(){
     // ── MUTUAL FUND SECTION ──────────────────────────────────────────
 
     // SIP banner
-    const mfInv2 = MF_PORTFOLIO.reduce((s,p)=>s+mfTotalInvested(p.isin),0);
-    const mfCur2 = MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||mfTotalInvested(p.isin)),0);
-    const grandCur = cur + mfCur2;
-    const grandInv = inv + mfInv2;
-    const grandPct = grandInv>0?((grandCur-grandInv)/grandInv)*100:0;
     out+=`<div class="sip-banner" style="margin-top:16px">
       <div>
         <div class="mono" style="font-size:12px;color:#40556A;margin-bottom:6px">
@@ -2089,13 +2076,7 @@ function renderPortfolio(){
       </div>
     </div>`;
   }
-  out+=`</div>`;
-  // ── RIGHT COL: MF ────────────────────────────────────────────────
-  out+=`<div>`;
   out+=renderMFSection();
-  out+=`</div>`;
-  // ── END GRID ─────────────────────────────────────────────────────
-  out+=`</div>`;
   out+=`</div>`;
   return out;
 }

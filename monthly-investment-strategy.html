@@ -1793,6 +1793,10 @@ function renderPortfolio(){
     }
   }
 
+  // Always render 2-col split — ETF left, MF right
+  out+=`<div style="display:grid;grid-template-columns:1.15fr 0.85fr;gap:20px;align-items:start" class="portfolio-split">`;
+  // ── LEFT COL: ETF ────────────────────────────────────────────────
+  out+=`<div>`;
   if(S.etfHoldings.length&&!S.portfolioLoading){
     const inv=totalInvested(),cur=totalCurrent(),pnl=totalPnL(),pct=totalPnLPct();
     const s30=S.snap30,pct30=S.thirtyDayPnLPct,sip=sipTotal();
@@ -1807,20 +1811,12 @@ function renderPortfolio(){
     const missingETFs = STRATEGY_ETF.filter(p=>!S.etfHoldings.find(h=>
       h.ticker===p.ticker || (h.tradingSymbol||"").toUpperCase()===p.ticker.toUpperCase()
     ));
-    const mfNote = MF_PORTFOLIO.length;
-    if(missingETFs.length||mfNote){
+    if(missingETFs.length){
       out+=`<div style="margin-bottom:16px;padding:11px 16px;background:#18100030;border:1px solid #78350f50;border-radius:10px;font-size:13px;color:#D97706;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <span>
-          ${missingETFs.length?`⚡ ${missingETFs.length} ETF(s) not yet held — `:""}
-          ${mfNote?`🏦 ${mfNote} Mutual Fund(s) not shown here (appear in Dhan MF portfolio, not equity holdings)`:""}
-        </span>
-        <div class="btn-row">
-          ${missingETFs.length?`<button class="btn btn-amber btn-sm" onclick="switchTab('execute')">⚡ Buy ETFs →</button>`:""}
-          ${mfNote?`<button class="btn btn-ghost btn-sm" onclick="window.open('https://dhan.co/mutual-funds/','_blank')">📱 Dhan MF →</button>`:""}
-        </div>
+        <span>⚡ ${missingETFs.length} ETF(s) not yet held</span>
+        <button class="btn btn-amber btn-sm" onclick="switchTab('execute')">⚡ Buy ETFs →</button>
       </div>`;
     }
-    out+=`<div style="display:grid;grid-template-columns:1.15fr 0.85fr;gap:20px;align-items:start" class="portfolio-split"><div>`;
     out+=`<div class="htable">
       <div class="htable-head">
         <div style="font-weight:600;font-size:14px">Holdings Detail
@@ -1840,17 +1836,88 @@ function renderPortfolio(){
         (e.isin||"").toUpperCase()===p.isin.toUpperCase()
       );
 
-      // ── Not held / MF placeholder ────────────────────────────────────────
+      // ── MF row: show real data from mfHoldings entries ─────────────────────
+      if(isMF){
+        const entries = mfEntries(p.isin);
+        const nav     = S.mfNavs[p.isin];
+        const totalU  = mfTotalUnits(p.isin);
+        const totalInv= mfTotalInvested(p.isin);
+        const avgN    = mfAvgNav(p.isin);
+        const cv      = mfCurrentValue(p.isin);
+        const pnl     = mfPnL(p.isin);
+        const pct     = mfPnLPct(p.isin);
+        const hasData = entries.length>0;
+        const isOpen  = S.expandedTicker===p.ticker;
+
+        out+=`<div style="border-bottom:1px solid #111D2E">
+          <div class="htable-row" style="${hasData?"cursor:pointer;":""}"
+               onclick="${hasData?"toggleTicker('"+p.ticker+"')":""}">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="width:14px;text-align:center;flex-shrink:0;color:#FFB74D;font-size:13px">${hasData?(isOpen?"▾":"▸"):""}</span>
+              <div style="width:36px;height:36px;border-radius:10px;background:${p.color}15;border:1px solid ${p.color}30;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${p.icon}</div>
+              <div style="min-width:0">
+                <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+                  <span class="mono" style="font-size:13px;font-weight:700;color:${p.color}">${p.ticker}</span>
+                  <span class="badge badge-amber" style="font-size:9px;padding:2px 4px">MF</span>
+                  ${hasData?`<span class="badge" style="font-size:9px;padding:2px 5px;background:#1a0f00;border:1px solid #92400e;color:#FFB74D">${entries.length} entr${entries.length!==1?"ies":"y"}</span>`:""}
+                </div>
+                <div style="font-size:11px;color:#60778A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px">${p.instrument}</div>
+                ${!hasData?`<button class="btn btn-amber btn-sm" style="font-size:10px;padding:3px 8px;margin-top:3px" onclick="event.stopPropagation();switchTab('portfolio');setTimeout(()=>{const el=document.getElementById('mf-units-${p.isin}');if(el)el.scrollIntoView({behavior:'smooth'});},100)">+ Add entry</button>`:""}
+              </div>
+            </div>
+            <div style="text-align:right">
+              ${hasData?`<div class="mono" style="font-size:14px;font-weight:600">${totalU.toFixed(3)}</div><div style="font-size:10px;color:#40556A">units</div>`:`<span style="color:#40556A">—</span>`}
+            </div>
+            <div style="text-align:right" class="hcol3">
+              ${hasData?`<span class="mono" style="font-size:13px">₹${avgN.toFixed(3)}</span>`:`<span style="color:#40556A">—</span>`}
+            </div>
+            <div style="text-align:right" class="hcol4">
+              ${nav?`<span class="mono" style="font-size:13px;font-weight:600;color:${nav.nav>avgN?"#4ADE80":nav.nav<avgN?"#F87171":"#D8E3EF"}">₹${nav.nav.toFixed(3)}</span>`:`<span style="font-size:11px;color:#40556A">NAV?</span>`}
+            </div>
+            <div style="text-align:right">
+              ${cv!==null?`<span class="mono" style="font-size:14px;font-weight:600;color:#4FC3F7">${fmtC(cv)}</span>`:`<span style="color:#40556A">${hasData?fmtC(totalInv)+" (cost)":"—"}</span>`}
+            </div>
+            <div style="text-align:right">
+              ${pnl!==null
+                ?`<div class="mono" style="font-size:13px;font-weight:700;color:${pnlColor(pct)}">${pnl>=0?"+":"−"}${fmtC(Math.abs(pnl))}</div>
+                  <span class="badge" style="background:${pnlBg(pct)};border:1px solid ${pnlBorder(pct)};color:${pnlColor(pct)};margin-top:3px;display:inline-block">${fmtP(pct)}</span>`
+                :`<span style="color:#40556A">${hasData?"Load NAV":"—"}</span>`}
+            </div>
+          </div>
+          ${isOpen&&hasData?`
+          <div style="background:#04080E;border-top:1px solid #0D1822">
+            <div style="display:grid;grid-template-columns:110px 90px 1fr 1fr;padding:7px 16px 7px 58px;font-size:10px;color:#2A3F5C;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid #080E18">
+              <div>Date</div><div style="text-align:right">Units</div><div style="text-align:right">NAV</div><div style="text-align:right">Amount</div>
+            </div>
+            ${entries.map((e,i)=>`
+            <div style="display:grid;grid-template-columns:110px 90px 1fr 1fr;padding:8px 16px 8px 58px;${i%2===0?"background:#04080E":"background:#060D16"};border-bottom:1px solid #080E18">
+              <div class="mono" style="font-size:12px;color:#60778A">${e.date||"—"}</div>
+              <div class="mono" style="text-align:right;font-size:13px;color:#D8E3EF">${e.units.toFixed(4)}</div>
+              <div class="mono" style="text-align:right;font-size:13px;color:#94A3B8">₹${e.nav.toFixed(4)}</div>
+              <div class="mono" style="text-align:right;font-size:13px;font-weight:600;color:#FFB74D">${fmtC(e.amount)}</div>
+            </div>`).join("")}
+            <div style="display:grid;grid-template-columns:110px 90px 1fr 1fr;padding:8px 16px 8px 58px;background:#020508;border-top:1px solid #1a2535">
+              <div style="font-size:10px;color:#40556A;text-transform:uppercase;padding-top:3px">Total</div>
+              <div class="mono" style="text-align:right;font-size:14px;font-weight:700;color:#FFB74D">${totalU.toFixed(4)}</div>
+              <div class="mono" style="text-align:right;font-size:12px;color:#60778A">₹${avgN.toFixed(4)} avg</div>
+              <div class="mono" style="text-align:right;font-size:14px;font-weight:700;color:#FFB74D">${fmtC(totalInv)}</div>
+            </div>
+          </div>`:""}
+        </div>`;
+        return;
+      }
+
+      // ── ETF not held ──────────────────────────────────────────────────────
       if(!h){
         const isLegacy=p.legacy;
-        out+=`<div class="htable-row" style="opacity:${isMF?0.55:0.30}">
+        out+=`<div class="htable-row" style="opacity:0.30">
           <div style="display:flex;align-items:center;gap:10px;padding-left:14px">
             <span style="font-size:20px">${p.icon}</span>
             <div>
               <div class="mono" style="font-size:13px;font-weight:700;color:${p.color}">${p.ticker}</div>
               <div style="font-size:11px;color:#60778A">${p.instrument.slice(0,38)}</div>
               <span class="badge badge-dim" style="font-size:9px;padding:2px 6px;margin-top:3px">
-                ${isMF?"MF — see section below":isLegacy?"Not in account":"Not yet held"}
+                ${isLegacy?"Not in account":"Not yet held"}
               </span>
             </div>
           </div>
@@ -1859,9 +1926,7 @@ function renderPortfolio(){
           <div style="text-align:right;color:#40556A" class="hcol4">—</div>
           <div style="text-align:right;color:#40556A">—</div>
           <div style="text-align:right">
-            ${isMF
-              ?`<button class="btn btn-amber btn-sm" style="font-size:10px;padding:4px 10px" onclick="window.open('${p.dhanMFUrl||"https://dhan.co/mutual-funds/"}','_blank')">📱 Invest</button>`
-              :`<button class="btn btn-blue btn-sm" style="font-size:10px;padding:4px 10px" onclick="switchTab('execute')">⚡ Buy</button>`}
+            <button class="btn btn-blue btn-sm" style="font-size:10px;padding:4px 10px" onclick="switchTab('execute')">⚡ Buy</button>
           </div>
         </div>`;
         return;
@@ -2006,34 +2071,44 @@ function renderPortfolio(){
       </div></div></div>`;
 
     // ── MUTUAL FUND SECTION ──────────────────────────────────────────
-    out+=`</div></div><div>`;   // close ETF col, open MF col
-    out+=renderMFSection();
-    out+=`</div></div>`;        // close MF col + grid
-    // ────────────────────────────────────────────────────────────────
 
-    // Combined totals for SIP banner
-    const mfInv = MF_PORTFOLIO.reduce((s,p)=>s+mfTotalInvested(p.isin),0);
-    const mfCur = MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||mfTotalInvested(p.isin)),0);
-    const grandCur = cur + mfCur;
-    const grandInv = inv + mfInv;
-    const grandPnl = grandCur - grandInv;
-    const grandPct = grandInv>0?(grandPnl/grandInv)*100:0;
-
-    out+=`<div class="sip-banner">
+    // SIP banner
+    const mfInv2 = MF_PORTFOLIO.reduce((s,p)=>s+mfTotalInvested(p.isin),0);
+    const mfCur2 = MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||mfTotalInvested(p.isin)),0);
+    const grandCur = cur + mfCur2;
+    const grandInv = inv + mfInv2;
+    const grandPct = grandInv>0?((grandCur-grandInv)/grandInv)*100:0;
+    out+=`<div class="sip-banner" style="margin-top:16px">
       <div>
         <div class="mono" style="font-size:12px;color:#40556A;margin-bottom:6px">
-          ETF ${fmtC(cur)} + MF ${fmtC(mfCur)} = <strong style="color:#4FC3F7">${fmtC(grandCur)}</strong> total portfolio
+          ETF ${fmtC(cur)} + MF ${fmtC(mfCur2)} = <strong style="color:#4FC3F7">${fmtC(grandCur)}</strong>
           ${grandInv>0?` · P&L <strong style="color:${pnlColor(grandPct)}">${fmtP(grandPct)}</strong>`:""}
         </div>
-        <div class="serif" style="font-size:28px;color:#4FC3F7">${fmtC(sip)} <span style="font-size:15px;color:#60778A">SIP this month</span></div>
-        ${s30&&pct30<0?`<div style="font-size:12px;color:#D97706;margin-top:5px">⚡ Dip-boosted — ${fmtC(yearFloor())} base + ${fmtC(sip-yearFloor())} boost</div>`:""}
+        <div class="serif" style="font-size:26px;color:#4FC3F7">${fmtC(sip)} <span style="font-size:14px;color:#60778A">SIP this month</span></div>
+        ${s30&&pct30<0?`<div style="font-size:12px;color:#D97706;margin-top:5px">⚡ Dip-boosted</div>`:""}
       </div>
       <div class="btn-row">
         <button class="btn btn-blue" onclick="switchTab('execute')">⚡ Execute SIP</button>
         <button class="btn btn-ghost btn-sm" onclick="logSIP()">📝 Log</button>
       </div>
     </div>`;
+  } else if(!S.portfolioLoading&&!S.portfolioError){
+    out+=`<div style="text-align:center;padding:48px 20px;color:#40556A">
+      <div style="font-size:36px;margin-bottom:12px">📦</div>
+      <div style="font-size:14px;margin-bottom:16px">Connect Dhan to see ETF holdings</div>
+      <div class="btn-row" style="justify-content:center">
+        <button class="btn btn-amber btn-sm" onclick="switchTab('settings')">🔑 Connect</button>
+        <button class="btn btn-ghost btn-sm" onclick="fetchPortfolio(true)">🎭 Demo</button>
+      </div>
+    </div>`;
   }
+  out+=`</div>`;
+  // ── RIGHT COL: MF ────────────────────────────────────────────────
+  out+=`<div>`;
+  out+=renderMFSection();
+  out+=`</div>`;
+  // ── END GRID ─────────────────────────────────────────────────────
+  out+=`</div>`;
   out+=`</div>`;
   return out;
 }

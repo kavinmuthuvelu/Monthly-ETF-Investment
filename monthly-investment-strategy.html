@@ -30,8 +30,8 @@ body{font-family:'DM Sans',sans-serif;background:#07090F;color:#D8E3EF;min-heigh
 .stat-val{font-family:'DM Mono',monospace;font-size:20px;font-weight:700}
 .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:22px}
-@media(max-width:900px){.grid-4{grid-template-columns:1fr 1fr!important}.grid-2{grid-template-columns:1fr!important}.portfolio-split{grid-template-columns:1fr!important}}
-@media(max-width:540px){.grid-4{grid-template-columns:1fr!important}}
+@media(max-width:900px){.grid-4{grid-template-columns:1fr 1fr!important}.grid-2{grid-template-columns:1fr!important}.portfolio-split{grid-template-columns:1fr!important}.port-stats{grid-template-columns:1fr 1fr!important}}
+@media(max-width:540px){.grid-4{grid-template-columns:1fr!important}.port-stats{grid-template-columns:1fr!important}}
 .btn{padding:9px 17px;border-radius:9px;border:none;cursor:pointer;font-family:inherit;font-weight:600;font-size:13px;transition:all .18s;display:inline-flex;align-items:center;gap:6px}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 .btn-blue{background:linear-gradient(135deg,#1351A8,#0278B8);color:#fff}
@@ -100,6 +100,11 @@ body{font-family:'DM Sans',sans-serif;background:#07090F;color:#D8E3EF;min-heigh
 @media(max-width:600px){.charges-grid{grid-template-columns:repeat(2,1fr)!important}}
 pre{font-family:'DM Mono',monospace;font-size:11px;color:#FCD34D;white-space:pre-wrap;line-height:1.75;word-break:break-word}
 code{font-family:'DM Mono',monospace;color:#C9940E;font-size:11px}
+/* ── Bright calendar picker icon ── */
+input[type="date"]::-webkit-calendar-picker-indicator{
+  filter:invert(1) brightness(3) sepia(1) hue-rotate(175deg) saturate(4);
+  cursor:pointer;opacity:1}
+input[type="date"]::-webkit-calendar-picker-indicator:hover{filter:invert(1) brightness(4) sepia(1) hue-rotate(175deg) saturate(5);}
 
 /* ── Env toggle ── */
 .env-toggle{display:flex;background:#060A12;border:1px solid #18263A;border-radius:10px;padding:4px;gap:4px}
@@ -706,20 +711,55 @@ async function fetchAMFINavs(){
   S.mfNavLoading=true; S.mfNavError=null;
   if(S.tab==="portfolio") render();
 
-  const base=S.proxyUrl.replace(/\/+$/,"");
+  // Try direct mfapi.in first (public CORS-friendly API, no proxy needed)
+  // mfapi.in: search by ISIN → get schemeCode → fetch NAV
+  const results={};
   try{
-    const r=await fetch(`${base}/amfi-nav?isins=${encodeURIComponent(isins.join(","))}`);
-    if(!r.ok) throw new Error("HTTP "+r.status);
-    const data=await r.json();
-    if(data.error) throw new Error(data.error);
-    S.mfNavs={...S.mfNavs,...data};
-    showToast(`NAV updated: ${Object.keys(data).map(isin=>{
-      const p=MF_PORTFOLIO.find(x=>x.isin===isin);
-      return (p?.ticker||isin.slice(-4))+" ₹"+(data[isin].nav||"?");
-    }).join(", ")} ✓`);
+    await Promise.all(MF_PORTFOLIO.map(async p=>{
+      try{
+        // Step 1: search for scheme by ISIN
+        const sr=await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(p.isin)}`,
+          {signal:AbortSignal.timeout(6000)});
+        if(!sr.ok) throw new Error("Search HTTP "+sr.status);
+        const schemes=await sr.json();
+        if(!schemes||!schemes.length) throw new Error("No scheme found for "+p.isin);
+        const schemeCode=schemes[0].schemeCode;
+
+        // Step 2: fetch NAV for that scheme code
+        const nr=await fetch(`https://api.mfapi.in/mf/${schemeCode}`,
+          {signal:AbortSignal.timeout(6000)});
+        if(!nr.ok) throw new Error("NAV HTTP "+nr.status);
+        const nd=await nr.json();
+        const latestNav=parseFloat(nd?.data?.[0]?.nav);
+        const navDate=nd?.data?.[0]?.date||"";
+        if(!latestNav||isNaN(latestNav)) throw new Error("Bad NAV value");
+        results[p.isin]={nav:latestNav, date:navDate, schemeName:nd.meta?.scheme_name||p.instrument, schemeCode};
+      } catch(e){
+        console.warn("mfapi.in failed for",p.ticker,"→",e.message);
+        // Fallback: try proxy /amfi-nav if proxy is active
+        if(S.proxyActive){
+          const base=S.proxyUrl.replace(/\/+$/,"");
+          const r=await fetch(`${base}/amfi-nav?isins=${encodeURIComponent(p.isin)}`).catch(()=>null);
+          if(r?.ok){
+            const d=await r.json().catch(()=>({}));
+            if(d[p.isin]?.nav) results[p.isin]=d[p.isin];
+          }
+        }
+      }
+    }));
+    const found=Object.keys(results).length;
+    if(found){
+      S.mfNavs={...S.mfNavs,...results};
+      showToast(`NAV updated: ${Object.entries(results).map(([isin,v])=>{
+        const p=MF_PORTFOLIO.find(x=>x.isin===isin);
+        return (p?.ticker||isin.slice(-4))+" ₹"+v.nav.toFixed(2);
+      }).join(", ")} ✓`);
+    } else {
+      throw new Error("No NAVs could be fetched");
+    }
   } catch(e){
     S.mfNavError=e.message;
-    showToast("AMFI NAV fetch failed: "+e.message,"error");
+    showToast("NAV fetch failed: "+e.message,"error");
   }
   S.mfNavLoading=false;
   if(S.tab==="portfolio") render();
@@ -1488,7 +1528,7 @@ function renderMFSection(){
         <div style="font-size:14px;font-weight:600">🏦 Mutual Fund Holdings</div>
         <div style="display:flex;align-items:center;gap:10px">
           ${anyNav?`<span style="font-size:11px;color:#40556A">AMFI · ${S.mfNavs[MF_PORTFOLIO.find(p=>S.mfNavs[p.isin])?.isin]?.date||""}</span>`:""}
-          <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="fetchAMFINavs()" ${!S.proxyActive||S.mfNavLoading?"disabled":""}>
+          <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="fetchAMFINavs()" ${S.mfNavLoading?"disabled":""}>
             ${S.mfNavLoading?`<span class="spin">⟳</span>`:"⟳"} Live NAV
           </button>
         </div>
@@ -1689,13 +1729,74 @@ function renderPortfolio(){
     const mfCurS=MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||mfTotalInvested(p.isin)||0),0);
     const mfCur2=MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||0),0);
     const grandCur=cur+mfCurS, grandInv=inv+mfInvS;
-    const grandPct=grandInv>0?((grandCur-grandInv)/grandInv)*100:0;
-    out+=`<div class="grid-4">
-      ${[{lbl:"Total Portfolio",val:fmtC(grandCur),c:"#4FC3F7",sub:fmtC(grandInv)+" invested · "+fmtP(grandPct)+" P&L"},
-         {lbl:"ETF Value",val:fmtC(cur),c:"#6EE7B7",sub:fmtC(inv)+" invested"},
-         {lbl:"MF Value",val:mfCurS>0?fmtC(mfCurS):(mfInvS>0?fmtC(mfInvS)+" cost":"—"),c:"#FFB74D",sub:mfCurS>0?"live NAV":"add entries / load NAV"},
-         {lbl:"SIP This Month",val:fmtC(sip),c:"#B87200",sub:pct30<0?`Dip-boosted (${pct30}%)`:"Base floor"},
-      ].map(c=>`<div class="stat-card"><div class="stat-label">${c.lbl}</div><div class="stat-val" style="color:${c.c}">${c.val}</div><div style="font-size:12px;color:${c.c};margin-top:4px;opacity:.7">${c.sub}</div></div>`).join("")}
+    const grandPnl=grandCur-grandInv;
+    const grandPct=grandInv>0?(grandPnl/grandInv)*100:0;
+    // ── Portfolio summary: 3 big blocks + SIP ──────────────────────────
+    out+=`<div class="port-stats" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;margin-bottom:20px">
+
+      <!-- Block 1: Total Invested -->
+      <div style="background:#090E18;border:1px solid #253A58;border-radius:14px;padding:18px 20px">
+        <div style="font-size:10px;color:#40556A;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Total Invested</div>
+        <div style="font-family:'DM Mono',monospace;font-size:22px;font-weight:700;color:#D8E3EF">${fmtC(grandInv)}</div>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span style="color:#40556A">ETF</span>
+            <span class="mono" style="color:#4FC3F7">${inv?fmtC(inv):"—"}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span style="color:#40556A">MF</span>
+            <span class="mono" style="color:#FFB74D">${mfInvS?fmtC(mfInvS):"—"}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Block 2: Current Value -->
+      <div style="background:#090E18;border:1px solid #253A58;border-radius:14px;padding:18px 20px">
+        <div style="font-size:10px;color:#40556A;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Current Value</div>
+        <div style="font-family:'DM Mono',monospace;font-size:22px;font-weight:700;color:#4ADE80">${fmtC(grandCur)}</div>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span style="color:#40556A">ETF live</span>
+            <span class="mono" style="color:#4FC3F7">${fmtC(cur)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span style="color:#40556A">MF NAV</span>
+            <span class="mono" style="color:#FFB74D">${mfCurS>0?fmtC(mfCurS):(mfInvS>0?"at cost":"—")}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Block 3: P&L -->
+      <div style="background:${pnlBg(grandPct)};border:1px solid ${pnlBorder(grandPct)};border-radius:14px;padding:18px 20px">
+        <div style="font-size:10px;color:#40556A;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Profit / Loss</div>
+        <div style="font-family:'DM Mono',monospace;font-size:22px;font-weight:700;color:${pnlColor(grandPct)}">${grandPnl>=0?"+":"−"}${fmtC(Math.abs(grandPnl))}</div>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span style="color:#40556A">Overall</span>
+            <span class="badge" style="font-size:11px;padding:2px 8px;background:${pnlBg(grandPct)};border:1px solid ${pnlBorder(grandPct)};color:${pnlColor(grandPct)}">${fmtP(grandPct)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span style="color:#40556A">ETF only</span>
+            <span class="mono" style="color:${pnlColor(totalPnLPct())}">${pnl>=0?"+":"−"}${fmtC(Math.abs(pnl))}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Block 4: SIP -->
+      <div style="background:linear-gradient(145deg,#0E1823,#0A1018);border:1px solid #B8720040;border-radius:14px;padding:18px 20px">
+        <div style="font-size:10px;color:#40556A;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">SIP This Month</div>
+        <div style="font-family:'DM Mono',monospace;font-size:22px;font-weight:700;color:#B87200">${fmtC(sip)}</div>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span style="color:#40556A">Year floor</span>
+            <span class="mono" style="color:#60778A">${fmtC(yearFloor())}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span style="color:#40556A">${pct30<0?"Dip boost":"Status"}</span>
+            <span style="color:${pct30<0?"#D97706":"#4ADE80"};font-size:11px;font-weight:600">${pct30<0?"⚡ +"+fmtC(sip-yearFloor()):"✓ On track"}</span>
+          </div>
+        </div>
+      </div>
     </div>`;
     const missingETFs = STRATEGY_ETF.filter(p=>!S.etfHoldings.find(h=>
       h.ticker===p.ticker || (h.tradingSymbol||"").toUpperCase()===p.ticker.toUpperCase()
@@ -1943,11 +2044,10 @@ function renderPortfolio(){
         <span class="badge" style="background:${pnlBg(pct)};border:1px solid ${pnlBorder(pct)};color:${pnlColor(pct)};margin-top:4px">${fmtP(pct)}</span>
       </div></div></div>`;
 
-    const mfCur2b=MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||0),0);
     out+=`<div class="sip-banner" style="margin-top:16px">
       <div>
         <div class="mono" style="font-size:12px;color:#40556A;margin-bottom:6px">
-          ETF ${fmtC(cur)} + MF ${fmtC(mfCur2b)} = <strong style="color:#4FC3F7">${fmtC(grandCur)}</strong>
+          ETF ${fmtC(cur)} + MF ${fmtC(mfCur2)} = <strong style="color:#4FC3F7">${fmtC(grandCur)}</strong>
           ${grandInv>0?` · P&L <strong style="color:${pnlColor(grandPct)}">${fmtP(grandPct)}</strong>`:""}
         </div>
         <div class="serif" style="font-size:26px;color:#4FC3F7">${fmtC(sip)} <span style="font-size:14px;color:#60778A">SIP this month</span></div>
@@ -2386,6 +2486,7 @@ el("app").innerHTML=`
 `;
 
 render();
-</script>
+// Auto-fetch MF NAVs on load — mfapi.in is public, no proxy needed
+setTimeout(()=>fetchAMFINavs(), 900);
 </body>
 </html>

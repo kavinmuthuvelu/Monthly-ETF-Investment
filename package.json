@@ -1,0 +1,12 @@
+{
+  "name": "my-proxy",
+  "version": "1.0.0",
+  "main": "dhan-proxy.js",
+  "dependencies": {
+    "express": "^4.18.2",
+    "http-proxy-middleware": "^2.0.6"
+  },
+  "scripts": {
+    "start": "node dhan-proxy.js"
+  }
+}

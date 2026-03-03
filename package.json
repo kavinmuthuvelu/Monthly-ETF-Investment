@@ -1,0 +1,12 @@
+{
+  "name": "dhan-portfolio-proxy",
+  "version": "1.0.0",
+  "description": "CORS proxy + app server for Dhan portfolio tracker",
+  "main": "dhan-proxy.js",
+  "scripts": {
+    "start": "node dhan-proxy.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

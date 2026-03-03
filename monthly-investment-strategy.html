@@ -12,16 +12,16 @@ body{font-family:'DM Sans',sans-serif;background:#07090F;color:#D8E3EF;min-heigh
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#1E2D45;border-radius:4px}
 #app{min-height:100vh}
 .header{background:linear-gradient(180deg,#0B1728,#07090F);border-bottom:1px solid #18263A;padding:0 20px}
-.header-top{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:62px;flex-wrap:wrap;gap:8px}
+.header-top{max-width:960px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:62px;flex-wrap:wrap;gap:8px}
 .logo{display:flex;align-items:center;gap:12px}
 .logo-icon{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#1351A8,#B87200);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
 .logo-name{font-size:17px;font-weight:700;letter-spacing:.3px}
 .logo-sub{font-size:10px;color:#4FC3F7;margin-top:2px;letter-spacing:1.2px}
 .header-badges{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.tabs{max-width:1200px;margin:0 auto;display:flex;gap:2px;overflow-x:auto;padding-bottom:2px}
+.tabs{max-width:960px;margin:0 auto;display:flex;gap:2px;overflow-x:auto;padding-bottom:2px}
 .tab{padding:8px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;color:#60778A;border:none;background:transparent;white-space:nowrap;font-family:inherit;transition:all .2s}
 .tab.active{background:#14243A;color:#4FC3F7}
-.content{max-width:1200px;margin:0 auto;padding:22px 20px}
+.content{max-width:960px;margin:0 auto;padding:22px 20px}
 .card{background:linear-gradient(145deg,#0E1520,#0A1018);border:1px solid #18263A;border-radius:16px;padding:22px}
 .row-item{border:1px solid #18263A;border-radius:12px;padding:15px 18px;background:#090E18;transition:border-color .2s,transform .15s;margin-bottom:11px}
 .row-item:hover{border-color:#253A58;transform:translateX(2px)}
@@ -30,7 +30,7 @@ body{font-family:'DM Sans',sans-serif;background:#07090F;color:#D8E3EF;min-heigh
 .stat-val{font-family:'DM Mono',monospace;font-size:20px;font-weight:700}
 .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:22px}
-@media(max-width:900px){.grid-4{grid-template-columns:1fr 1fr!important}.grid-2{grid-template-columns:1fr!important}}
+@media(max-width:900px){.grid-4{grid-template-columns:1fr 1fr!important}.grid-2{grid-template-columns:1fr!important}.portfolio-split{grid-template-columns:1fr!important}}
 @media(max-width:540px){.grid-4{grid-template-columns:1fr!important}}
 .btn{padding:9px 17px;border-radius:9px;border:none;cursor:pointer;font-family:inherit;font-weight:600;font-size:13px;transition:all .18s;display:inline-flex;align-items:center;gap:6px}
 .btn:disabled{opacity:.4;cursor:not-allowed}
@@ -311,7 +311,7 @@ const S = {
   todayOrdersError:   null,
   reqLog:    [],          // live diagnostics
   // ── MF holdings (manually entered + AMFI NAV enriched) ──────────
-  mfHoldings: loadMFHoldings(),   // { [isin]: { units, avgNav, investedAmount, dateAdded } }
+  mfHoldings: loadMFHoldings(),   // { [isin]: [ {date, units, nav, amount}, ... ] }
   mfNavs:     {},                 // { [isin]: { nav, date, schemeName } }  from AMFI
   mfNavLoading: false,
   mfNavError: null,
@@ -355,7 +355,20 @@ function pnlBorder(p){return p>=0.01?"#059669":p<=-0.01?"#DC2626":"#18263A"; }
 function computeSIP(loss,floor){ return loss>=0?floor:Math.round(floor+Math.abs(loss)*0.04*floor); }
 function getYearFloor(sd,base){ if(!sd)return base; const y=Math.floor((Date.now()-new Date(sd))/(365.25*24*3600*1000)); return Math.round(base*Math.pow(1.1,y)); }
 function loadSnapshots(){ try{return JSON.parse(localStorage.getItem(SNAP_KEY)||"[]");}catch{return [];} }
-function loadMFHoldings(){ try{return JSON.parse(localStorage.getItem("mf_holdings")||"{}");}catch{return {};} }
+function loadMFHoldings(){
+  try{
+    const raw=JSON.parse(localStorage.getItem("mf_holdings")||"{}");
+    // migrate old format {units,avgNav,...} → [{date,units,nav,amount}]
+    const out={};
+    Object.entries(raw).forEach(([isin,v])=>{
+      if(Array.isArray(v)) out[isin]=v;
+      else if(v&&typeof v==="object"&&v.units)
+        out[isin]=[{date:v.dateAdded||"",units:+v.units,nav:+v.avgNav,
+                    amount:+(v.investedAmount||v.units*v.avgNav)}];
+    });
+    return out;
+  }catch{return {};}
+}
 function saveMFHoldings(h){ localStorage.setItem("mf_holdings",JSON.stringify(h)); }
 /* ══════════════════════════════════════════════════
    GROWTH CHART HELPERS
@@ -583,7 +596,7 @@ function renderGrowth(){
   const totalInv   = sipEntries.reduce((s,e)=>s+e.amount,0);
   // ETF invested = from tradebook (etfHoldings.investedValue) or holdings fallback
   const etfInv     = S.etfHoldings.reduce((s,h)=>s+(h.investedValue||0),0);
-  const mfInv      = MF_PORTFOLIO.reduce((s,p)=>{const h=S.mfHoldings[p.isin];return s+(h?.investedAmount||0);},0);
+  const mfInv      = MF_PORTFOLIO.reduce((s,p)=>s+mfTotalInvested(p.isin),0);
   const totalInvAll= etfInv+mfInv;
   const curVal     = totalCurrent()+(MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||0),0));
   const pnl        = curVal-totalInvAll;
@@ -672,35 +685,51 @@ function get30DayValue(snaps){ if(!snaps.length)return null; const t=new Date();
 /* ══════════════════════════════════════════════════
    MF HOLDINGS — manual entry + AMFI NAV enrichment
 ══════════════════════════════════════════════════ */
+// MF helpers — mfHoldings[isin] is now an array of {date,units,nav,amount}
+function mfEntries(isin){ return S.mfHoldings[isin]||[]; }
+function mfTotalUnits(isin){ return mfEntries(isin).reduce((s,e)=>s+e.units,0); }
+function mfTotalInvested(isin){ return mfEntries(isin).reduce((s,e)=>s+e.amount,0); }
+function mfAvgNav(isin){ const u=mfTotalUnits(isin); return u>0?mfTotalInvested(isin)/u:0; }
 function mfCurrentValue(isin){
-  const h=S.mfHoldings[isin]; if(!h) return null;
+  const entries=mfEntries(isin); if(!entries.length) return null;
   const nav=S.mfNavs[isin]?.nav; if(!nav) return null;
-  return h.units * nav;
+  return mfTotalUnits(isin)*nav;
 }
 function mfPnL(isin){
-  const cur=mfCurrentValue(isin); const h=S.mfHoldings[isin];
-  if(cur===null||!h) return null;
-  return cur - (h.investedAmount||h.units*h.avgNav);
+  const cur=mfCurrentValue(isin); if(cur===null) return null;
+  const inv=mfTotalInvested(isin); return cur-inv;
 }
 function mfPnLPct(isin){
-  const pnl=mfPnL(isin); const h=S.mfHoldings[isin];
-  if(pnl===null||!h) return null;
-  const inv=h.investedAmount||h.units*h.avgNav;
-  return inv>0?(pnl/inv)*100:null;
+  const pnl=mfPnL(isin); if(pnl===null) return null;
+  const inv=mfTotalInvested(isin); return inv>0?(pnl/inv)*100:null;
 }
 
-function saveMFHolding(isin, units, avgNav, investedAmount){
-  S.mfHoldings[isin]={units:parseFloat(units),avgNav:parseFloat(avgNav),
-    investedAmount:parseFloat(investedAmount)||parseFloat(units)*parseFloat(avgNav),
-    dateAdded:S.mfHoldings[isin]?.dateAdded||new Date().toISOString().slice(0,10)};
+function addMFEntry(isin, date, units, nav, amount){
+  if(!S.mfHoldings[isin]) S.mfHoldings[isin]=[];
+  S.mfHoldings[isin].push({
+    date: date||new Date().toISOString().slice(0,10),
+    units: parseFloat(units)||0,
+    nav:   parseFloat(nav)||0,
+    amount:parseFloat(amount)||(parseFloat(units)*parseFloat(nav))||0,
+  });
+  // keep sorted oldest first
+  S.mfHoldings[isin].sort((a,b)=>a.date.localeCompare(b.date));
   saveMFHoldings(S.mfHoldings);
-  render(); showToast("MF holding saved ✓");
+  render(); showToast("MF entry added ✓");
   if(S.proxyActive) fetchAMFINavs();
+}
+
+function deleteMFEntry(isin, idx){
+  if(!S.mfHoldings[isin]) return;
+  S.mfHoldings[isin].splice(idx,1);
+  if(!S.mfHoldings[isin].length) delete S.mfHoldings[isin];
+  saveMFHoldings(S.mfHoldings);
+  render(); showToast("Entry removed","error");
 }
 
 function deleteMFHolding(isin){
   delete S.mfHoldings[isin]; saveMFHoldings(S.mfHoldings); render();
-  showToast("MF holding removed","error");
+  showToast("All entries removed","error");
 }
 
 async function fetchAMFINavs(){
@@ -988,9 +1017,9 @@ async function fetchPortfolio(demo=false){
     S.thirtyDayPnLPct=parseFloat(((cur-prior)/prior*100).toFixed(1));
     S.lossPercent=Math.min(0,S.thirtyDayPnLPct);
     MF_PORTFOLIO.forEach((p,i)=>{
-      if(!S.mfHoldings[p.isin]){
+      if(!S.mfHoldings[p.isin]||!S.mfHoldings[p.isin].length){
         const units=[125.456,88.201][i]||100, avgNav=[18.5,55.2][i]||50;
-        S.mfHoldings[p.isin]={units,avgNav,investedAmount:units*avgNav,dateAdded:"2024-01-01"};
+        S.mfHoldings[p.isin]=[{date:"2024-01-01",units,nav:avgNav,amount:units*avgNav}];
       }
       const avgNav=[18.5,55.2][i]||50;
       S.mfNavs[p.isin]={nav:avgNav*1.08,date:new Date().toISOString().slice(0,10),schemeName:p.instrument};
@@ -1513,22 +1542,19 @@ function logSIP(){
    No Dhan API used — AMFI is the official source.
 ══════════════════════════════════════════════════ */
 function renderMFSection(){
-  const anyEntered = MF_PORTFOLIO.some(p=>S.mfHoldings[p.isin]);
+  const anyEntries = MF_PORTFOLIO.some(p=>mfEntries(p.isin).length>0);
   const anyNav     = MF_PORTFOLIO.some(p=>S.mfNavs[p.isin]);
-  const totalMFInv = MF_PORTFOLIO.reduce((s,p)=>{const h=S.mfHoldings[p.isin];return s+(h?.investedAmount||h?.units*h?.avgNav||0);},0);
+  const totalMFInv = MF_PORTFOLIO.reduce((s,p)=>s+mfTotalInvested(p.isin),0);
   const totalMFCur = MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||0),0);
-  const mfPnLTotal = MF_PORTFOLIO.reduce((s,p)=>{const x=mfPnL(p.isin);return s+(x||0);},0);
-  const mfPctTot   = totalMFInv>0?(mfPnLTotal/totalMFInv)*100:0;
+  const mfPnLTot   = MF_PORTFOLIO.reduce((s,p)=>{const x=mfPnL(p.isin);return s+(x||0);},0);
+  const mfPctTot   = totalMFInv>0?(mfPnLTot/totalMFInv)*100:0;
 
   let html=`
   <div style="margin-top:22px">
-    <!-- Header -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
       <div>
         <div style="font-size:17px;font-weight:700">🏦 Mutual Fund Holdings</div>
-        <div style="font-size:12px;color:#60778A;margin-top:3px">
-          NAV from AMFI India (official) · Enter units once, NAV auto-refreshes
-        </div>
+        <div style="font-size:12px;color:#60778A;margin-top:3px">Date-wise entry log · NAV from AMFI India (official)</div>
       </div>
       <div class="btn-row">
         <button class="btn btn-ghost btn-sm" onclick="fetchAMFINavs()" ${!S.proxyActive||S.mfNavLoading?"disabled":""}>
@@ -1541,18 +1567,20 @@ function renderMFSection(){
       ⚠️ NAV fetch failed: ${S.mfNavError} — ${S.proxyActive?"Try again":"start proxy first"}
     </div>`:""}
 
-    <!-- Per-fund cards -->
     ${MF_PORTFOLIO.map(p=>{
-      const h   = S.mfHoldings[p.isin];
-      const nav = S.mfNavs[p.isin];
-      const cv  = mfCurrentValue(p.isin);
-      const pnl = mfPnL(p.isin);
-      const pct = mfPnLPct(p.isin);
-      const inv = h ? (h.investedAmount||h.units*h.avgNav) : 0;
+      const entries = mfEntries(p.isin);
+      const nav     = S.mfNavs[p.isin];
+      const totalU  = mfTotalUnits(p.isin);
+      const totalInv= mfTotalInvested(p.isin);
+      const avgN    = mfAvgNav(p.isin);
+      const cv      = mfCurrentValue(p.isin);
+      const pnl     = mfPnL(p.isin);
+      const pct     = mfPnLPct(p.isin);
 
-      return `<div class="card" style="margin-bottom:14px;border-color:${p.color}20">
+      return `<div class="card" style="margin-bottom:14px;border-color:${p.color}20;padding:0;overflow:hidden">
+
         <!-- Fund header -->
-        <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:${h?"16px":"12px"};flex-wrap:wrap">
+        <div style="display:flex;align-items:flex-start;gap:14px;padding:16px 18px;flex-wrap:wrap">
           <div style="width:44px;height:44px;border-radius:12px;background:${p.color}18;border:1px solid ${p.color}30;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${p.icon}</div>
           <div style="flex:1;min-width:0">
             <div style="font-size:14px;font-weight:700;margin-bottom:4px">${p.instrument}</div>
@@ -1565,112 +1593,113 @@ function renderMFSection(){
           <div style="text-align:right;flex-shrink:0">
             ${nav
               ?`<div class="mono" style="font-size:18px;font-weight:700;color:${p.color}">₹${nav.nav.toFixed(4)}</div>
-                <div style="font-size:10px;color:#40556A">NAV as of ${nav.date}</div>`
-              :`<div style="font-size:12px;color:#40556A">${S.mfNavLoading?`<span class="spin">⟳</span>`:"NAV not loaded"}</div>
-                <button class="btn btn-ghost btn-sm" style="margin-top:4px;font-size:11px" onclick="fetchAMFINavs()" ${!S.proxyActive||S.mfNavLoading?"disabled":""}>Load NAV</button>`}
+                <div style="font-size:10px;color:#40556A">NAV · ${nav.date}</div>`
+              :`<div style="font-size:12px;color:#40556A;margin-bottom:4px">${S.mfNavLoading?`<span class="spin">⟳</span>`:"NAV not loaded"}</div>
+                <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="fetchAMFINavs()" ${!S.proxyActive||S.mfNavLoading?"disabled":""}>Load NAV</button>`}
           </div>
         </div>
 
-        ${h ? `
-        <!-- Holdings data -->
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+        <!-- Summary stats (only when entries exist) -->
+        ${entries.length?`
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-top:1px solid #111D2E;border-bottom:1px solid #111D2E">
           ${[
-            ["Units Held", h.units.toFixed(4), p.color],
-            ["Avg NAV",    "₹"+h.avgNav.toFixed(4), "#94A3B8"],
-            ["Invested",   fmtC(inv), "#60778A"],
-            cv!==null
-              ? ["Current Value", fmtC(cv), "#4FC3F7"]
-              : ["Current Value", "Load NAV →", "#40556A"],
+            ["Total Units", totalU.toFixed(4),  p.color],
+            ["Avg NAV",     "₹"+avgN.toFixed(4),"#94A3B8"],
+            ["Invested",    fmtC(totalInv),      "#60778A"],
+            cv!==null?["Current",fmtC(cv),"#4FC3F7"]:["Current","Load NAV →","#40556A"],
           ].map(([l,v,c])=>`
-            <div style="padding:10px 12px;background:#090E18;border-radius:10px;border:1px solid #18263A">
-              <div style="font-size:10px;color:#40556A;text-transform:uppercase;letter-spacing:.6px;margin-bottom:5px">${l}</div>
-              <div class="mono" style="font-size:14px;font-weight:600;color:${c}">${v}</div>
-            </div>`).join("")}
+          <div style="padding:10px 14px;background:#060C14;border-right:1px solid #111D2E">
+            <div style="font-size:10px;color:#40556A;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${l}</div>
+            <div class="mono" style="font-size:13px;font-weight:600;color:${c}">${v}</div>
+          </div>`).join("")}
         </div>
-        ${pnl!==null ? `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-radius:10px;background:${pnlBg(pct)};border:1px solid ${pnlBorder(pct)};flex-wrap:wrap;gap:8px">
-          <div style="font-size:13px;color:#60778A">Unrealised P&L</div>
-          <div style="display:flex;align-items:center;gap:12px">
-            <div class="mono" style="font-size:16px;font-weight:700;color:${pnlColor(pct)}">${pnl>=0?"+":"−"}${fmtC(Math.abs(pnl))}</div>
+        ${pnl!==null?`
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:${pnlBg(pct)};border-bottom:1px solid ${pnlBorder(pct)};flex-wrap:wrap;gap:8px">
+          <span style="font-size:12px;color:#60778A">Unrealised P&L</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="mono" style="font-size:15px;font-weight:700;color:${pnlColor(pct)}">${pnl>=0?"+":"−"}${fmtC(Math.abs(pnl))}</span>
             <span class="badge" style="background:${pnlBg(pct)};border:1px solid ${pnlBorder(pct)};color:${pnlColor(pct)}">${fmtP(pct)}</span>
           </div>
-        </div>` : `<div style="font-size:12px;color:#40556A;padding:6px 0">Load NAV to see P&L</div>`}
-        <div style="display:flex;justify-content:flex-end;margin-top:10px;gap:8px">
-          <button class="btn btn-ghost btn-sm" onclick="openMFEditModal('${p.isin}')">✏️ Edit</button>
-          <button class="btn btn-red btn-sm" style="font-size:11px;padding:5px 10px" onclick="if(confirm('Remove ${p.ticker} holdings?'))deleteMFHolding('${p.isin}')">✕ Remove</button>
+        </div>`:""}
+
+        <!-- Entry log table -->
+        <div style="background:#040A12">
+          <div style="display:grid;grid-template-columns:110px 90px 1fr 1fr 32px;padding:7px 16px;font-size:10px;color:#2A3F5C;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid #0A1520">
+            <div>Date</div><div style="text-align:right">Units</div><div style="text-align:right">NAV</div><div style="text-align:right">Amount</div><div></div>
+          </div>
+          ${entries.map((e,i)=>`
+          <div style="display:grid;grid-template-columns:110px 90px 1fr 1fr 32px;padding:8px 16px;${i%2===0?"background:#040A12":"background:#060E18"};border-bottom:1px solid #080F1A;align-items:center">
+            <div class="mono" style="font-size:12px;color:#60778A">${e.date||"—"}</div>
+            <div class="mono" style="text-align:right;font-size:13px;color:#D8E3EF">${e.units.toFixed(4)}</div>
+            <div class="mono" style="text-align:right;font-size:13px;color:#94A3B8">₹${e.nav.toFixed(4)}</div>
+            <div class="mono" style="text-align:right;font-size:13px;font-weight:600;color:#4FC3F7">${fmtC(e.amount)}</div>
+            <div style="text-align:center">
+              <button onclick="if(confirm('Remove this entry?'))deleteMFEntry('${p.isin}',${i})"
+                style="background:transparent;border:none;color:#40556A;cursor:pointer;font-size:14px;padding:0;line-height:1" title="Delete">✕</button>
+            </div>
+          </div>`).join("")}
+        </div>`:""}
+
+        <!-- Add new entry form -->
+        <div style="padding:14px 16px;background:#06101A;border-top:1px solid #111D2E">
+          <div style="font-size:11px;font-weight:600;color:#60778A;margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">
+            ${entries.length?"+ Add entry":"Enter your holdings"}
+          </div>
+          <div style="display:grid;grid-template-columns:120px 1fr 1fr 1fr auto;gap:8px;align-items:flex-end">
+            <div>
+              <label class="inp-label">Date</label>
+              <input class="inp" type="date" id="mf-date-${p.isin}"
+                value="${new Date().toISOString().slice(0,10)}"
+                style="padding:6px 8px;font-size:12px">
+            </div>
+            <div>
+              <label class="inp-label">Units</label>
+              <input class="inp" type="number" step="0.001" min="0" id="mf-units-${p.isin}" placeholder="e.g. 125.456" style="padding:6px 8px;font-size:12px">
+            </div>
+            <div>
+              <label class="inp-label">NAV (₹)</label>
+              <input class="inp" type="number" step="0.0001" min="0" id="mf-nav-${p.isin}" placeholder="e.g. 18.50" style="padding:6px 8px;font-size:12px">
+            </div>
+            <div>
+              <label class="inp-label">Amount (₹)</label>
+              <input class="inp" type="number" step="1" min="0" id="mf-amt-${p.isin}" placeholder="auto" style="padding:6px 8px;font-size:12px">
+            </div>
+            <button class="btn btn-amber btn-sm" style="margin-bottom:1px" onclick="(()=>{
+              const date=document.getElementById('mf-date-${p.isin}').value;
+              const u=parseFloat(document.getElementById('mf-units-${p.isin}').value||0);
+              const n=parseFloat(document.getElementById('mf-nav-${p.isin}').value||0);
+              const a=parseFloat(document.getElementById('mf-amt-${p.isin}').value||0);
+              if(!u||!n){showToast('Enter units and NAV','error');return;}
+              addMFEntry('${p.isin}',date,u,n,a||u*n);
+            })()">+ Add</button>
+          </div>
+          ${entries.length?`
+          <div style="display:flex;justify-content:flex-end;margin-top:10px">
+            <button class="btn btn-red btn-sm" style="font-size:10px;padding:4px 8px"
+              onclick="if(confirm('Remove ALL entries for ${p.ticker}?'))deleteMFHolding('${p.isin}')">✕ Clear all</button>
+          </div>`:""}
         </div>
-        ` : `
-        <!-- Entry form -->
-        <div style="padding:14px;background:#090E18;border-radius:12px;border:1px dashed #253A58">
-          <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#94A3B8">Enter your holdings for ${p.ticker}</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
-            <div>
-              <label class="inp-label">Units held</label>
-              <input class="inp" type="number" step="0.001" min="0" id="mf-units-${p.isin}" placeholder="e.g. 125.456">
-            </div>
-            <div>
-              <label class="inp-label">Avg NAV (₹)</label>
-              <input class="inp" type="number" step="0.0001" min="0" id="mf-nav-${p.isin}" placeholder="e.g. 18.50">
-            </div>
-            <div>
-              <label class="inp-label">Amount invested (₹)</label>
-              <input class="inp" type="number" step="1" min="0" id="mf-amt-${p.isin}" placeholder="auto">
-            </div>
-          </div>
-          <div style="font-size:11px;color:#40556A;margin-bottom:10px;line-height:1.6">
-            Check units + avg NAV in your Dhan app → Mutual Funds → Your Funds → ${p.ticker}
-          </div>
-          <button class="btn btn-amber btn-sm" onclick="(()=>{
-            const u=parseFloat(document.getElementById('mf-units-${p.isin}').value||0);
-            const n=parseFloat(document.getElementById('mf-nav-${p.isin}').value||0);
-            const a=parseFloat(document.getElementById('mf-amt-${p.isin}').value||0);
-            if(!u||!n){showToast('Enter units and avg NAV','error');return;}
-            saveMFHolding('${p.isin}',u,n,a||u*n);
-          })()">💾 Save Holdings</button>
-        </div>`}
+
       </div>`;
     }).join("")}
 
-    ${anyEntered&&totalMFInv>0 ? `
-    <!-- MF summary footer -->
-    <div style="padding:16px 20px;background:#0C1828;border-radius:12px;border:1px solid #1351A860;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+    ${anyEntries&&totalMFInv>0?`
+    <div style="padding:14px 18px;background:#0C1828;border-radius:12px;border:1px solid #1351A860;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div>
-        <div style="font-size:11px;color:#40556A;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px">Mutual Fund Total</div>
+        <div style="font-size:10px;color:#40556A;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px">Mutual Fund Total</div>
         <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
           <span class="mono" style="font-size:13px;color:#60778A">Invested: ${fmtC(totalMFInv)}</span>
           ${totalMFCur>0?`<span class="mono" style="font-size:16px;font-weight:700;color:#4FC3F7">Now: ${fmtC(totalMFCur)}</span>`:""}
-          ${mfPnLTotal&&totalMFCur>0?`<span class="badge" style="background:${pnlBg(mfPctTot)};border:1px solid ${pnlBorder(mfPctTot)};color:${pnlColor(mfPctTot)}">${fmtP(mfPctTot)}</span>`:""}
+          ${mfPnLTot&&totalMFCur>0?`<span class="badge" style="background:${pnlBg(mfPctTot)};border:1px solid ${pnlBorder(mfPctTot)};color:${pnlColor(mfPctTot)}">${fmtP(mfPctTot)}</span>`:""}
         </div>
       </div>
-      <div style="font-size:12px;color:#40556A">Source: AMFI India · Updated ${anyNav?MF_PORTFOLIO.find(p=>S.mfNavs[p.isin])&&S.mfNavs[MF_PORTFOLIO.find(p=>S.mfNavs[p.isin]).isin]?.date:"—"}</div>
-    </div>` : `
+      <div style="font-size:11px;color:#40556A">Source: AMFI India · ${anyNav?`NAV date: ${S.mfNavs[MF_PORTFOLIO.find(p=>S.mfNavs[p.isin])?.isin]?.date||"—"}`:"NAV not loaded"}</div>
+    </div>`:`
     <div style="padding:16px 20px;background:#090E18;border-radius:12px;border:1px solid #18263A;font-size:13px;color:#40556A;text-align:center">
-      Enter your MF holdings above to see them here · NAV fetched from AMFI India (official, free)
+      Add MF entries above → NAV auto-fetched from AMFI India
     </div>`}
   </div>`;
   return html;
-}
-
-/* ══════════════════════════════════════════════════
-   MF EDIT MODAL (inline — reuses same entry form)
-══════════════════════════════════════════════════ */
-function openMFEditModal(isin){
-  const p = MF_PORTFOLIO.find(x=>x.isin===isin);
-  const h = S.mfHoldings[isin];
-  if(!p) return;
-  // Temporarily clear so the entry form shows
-  const backup = {...h};
-  delete S.mfHoldings[isin];
-  render();
-  // Pre-fill after render
-  setTimeout(()=>{
-    const eu=document.getElementById(`mf-units-${isin}`);
-    const en=document.getElementById(`mf-nav-${isin}`);
-    const ea=document.getElementById(`mf-amt-${isin}`);
-    if(eu) eu.value=backup.units;
-    if(en) en.value=backup.avgNav;
-    if(ea) ea.value=backup.investedAmount||"";
-  },50);
 }
 
 function renderPortfolio(){
@@ -1791,6 +1820,7 @@ function renderPortfolio(){
         </div>
       </div>`;
     }
+    out+=`<div style="display:grid;grid-template-columns:1.15fr 0.85fr;gap:20px;align-items:start" class="portfolio-split"><div>`;
     out+=`<div class="htable">
       <div class="htable-head">
         <div style="font-weight:600;font-size:14px">Holdings Detail
@@ -1976,12 +2006,14 @@ function renderPortfolio(){
       </div></div></div>`;
 
     // ── MUTUAL FUND SECTION ──────────────────────────────────────────
+    out+=`</div></div><div>`;   // close ETF col, open MF col
     out+=renderMFSection();
+    out+=`</div></div>`;        // close MF col + grid
     // ────────────────────────────────────────────────────────────────
 
     // Combined totals for SIP banner
-    const mfInv = MF_PORTFOLIO.reduce((s,p)=>{const h=S.mfHoldings[p.isin];return s+(h?.investedAmount||h?.units*h?.avgNav||0);},0);
-    const mfCur = MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||S.mfHoldings[p.isin]?.investedAmount||0),0);
+    const mfInv = MF_PORTFOLIO.reduce((s,p)=>s+mfTotalInvested(p.isin),0);
+    const mfCur = MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||mfTotalInvested(p.isin)),0);
     const grandCur = cur + mfCur;
     const grandInv = inv + mfInv;
     const grandPnl = grandCur - grandInv;

@@ -218,7 +218,8 @@ const PORTFOLIO = [
    icon:"🚀",
    dhanMFUrl:"https://dhan.co/mutual-funds/uti-nifty-midsmallcap-400-momentum-quality-100-index-fund-direct-growth/",
    amc:"UTI Mutual Fund",
-   mfSchemeCode:151186},          // AMFI scheme code for UTI MQ100 Direct Growth
+   dhanNavSlug:"uti-nifty-midsmallcap-400-momentum-quality-100-index-fund-direct-growth"},
+   // NAV fetched from Dhan page (scheme code was unreliable for this new fund)
 
   {id:"ppfcf",
    category:"Flexi Cap",
@@ -397,13 +398,38 @@ function buildAxisDates(startD){
 }
 
 function buildCumulativeInvested(axisDates){
+  // Actual invested from fetched ETF holdings + manually entered MF holdings
+  const etfInv = S.etfHoldings.reduce((s,h)=>s+(h.investedValue||0),0);
+  const mfInv  = MF_PORTFOLIO.reduce((s,p)=>s+mfTotalInvested(p.isin),0);
+  const holdingsTotal = etfInv + mfInv;
+
   const entries = filteredSIPHistory();
-  if(!entries.length) return axisDates.map(()=>0);
+  const today   = axisDates[axisDates.length-1];
+
+  // Build SIP-log cumulative series
   let cum=0, li=0;
-  return axisDates.map(d=>{
+  const sipCumulative = axisDates.map(d=>{
     while(li<entries.length && entries[li].isoDate<=d){ cum+=entries[li].amount; li++; }
     return cum;
   });
+
+  // If we have actual holdings data, use it to anchor today's value.
+  // Scale / cap SIP series so it doesn't exceed actual holdings total.
+  if(holdingsTotal>0){
+    const sipToday = sipCumulative[sipCumulative.length-1];
+    if(sipToday>0 && sipToday!==holdingsTotal){
+      // Blend: keep historical SIP progression, end at holdingsTotal
+      const scale = holdingsTotal/sipToday;
+      return sipCumulative.map((v,i)=>
+        i===sipCumulative.length-1 ? holdingsTotal : v*scale
+      );
+    }
+    if(sipToday===0){
+      // No SIP log at all — show flat line at holdingsTotal from start
+      return axisDates.map(()=>holdingsTotal);
+    }
+  }
+  return sipCumulative;
 }
 
 function buildNiftybeesSIP(axisDates){
@@ -497,7 +523,7 @@ function buildGrowthChart(){
   });
 
   const datasets=[{
-    label:"Invested ₹",
+    label:"Invested ₹ (ETF+MF)",
     data:investedData,
     borderColor:"#4FC3F7",
     backgroundColor:"rgba(79,195,247,0.07)",
@@ -610,19 +636,32 @@ function renderGrowth(){
 
   <div class="grid-4" style="margin-bottom:18px">
     <div class="stat-card">
-      <div class="stat-label">ETF Invested</div>
-      <div class="stat-val" style="color:#4FC3F7">${etfInv?fmtC(etfInv):"—"}</div>
-      <div style="font-size:12px;color:#40556A;margin-top:4px">${S.trackingStartDate?`trades from ${S.trackingStartDate}`:"lifetime avg"}</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">MF Invested</div>
-      <div class="stat-val" style="color:#FFB74D">${mfInv?fmtC(mfInv):"—"}</div>
-      <div style="font-size:12px;color:#40556A;margin-top:4px">manually entered</div>
+      <div class="stat-label">Total Invested</div>
+      <div class="stat-val" style="color:#D8E3EF">${totalInvAll?fmtC(totalInvAll):"—"}</div>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px">
+        <div style="display:flex;justify-content:space-between;font-size:11px">
+          <span style="color:#40556A">ETF <span style="font-size:10px">(from holdings)</span></span>
+          <span class="mono" style="color:#4FC3F7">${etfInv?fmtC(etfInv):"—"}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11px">
+          <span style="color:#40556A">MF <span style="font-size:10px">(entries)</span></span>
+          <span class="mono" style="color:#FFB74D">${mfInv?fmtC(mfInv):"—"}</span>
+        </div>
+      </div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Current Value</div>
       <div class="stat-val" style="color:${hasCurVal?"#4ADE80":"#60778A"}">${hasCurVal?fmtC(curVal):"—"}</div>
-      <div style="font-size:12px;color:#40556A;margin-top:4px">${hasCurVal?"ETF live + MF AMFI NAV":"Connect to Dhan"}</div>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px">
+        <div style="display:flex;justify-content:space-between;font-size:11px">
+          <span style="color:#40556A">ETF live</span>
+          <span class="mono" style="color:#4FC3F7">${fmtC(totalCurrent())}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11px">
+          <span style="color:#40556A">MF NAV</span>
+          <span class="mono" style="color:#FFB74D">${MF_PORTFOLIO.some(p=>mfCurrentValue(p.isin))?fmtC(MF_PORTFOLIO.reduce((s,p)=>s+(mfCurrentValue(p.isin)||0),0)):"—"}</span>
+        </div>
+      </div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Total P&L</div>
@@ -631,6 +670,11 @@ function renderGrowth(){
         ${hasCurVal&&totalInvAll?`<span class="badge" style="background:${pnlBg(pct)};border:1px solid ${pnlBorder(pct)};color:${pnlColor(pct)}">${fmtP(pct)}</span>`:"—"}
       </div>
     </div>
+    <div class="stat-card">
+      <div class="stat-label">SIP Logged</div>
+      <div class="stat-val" style="color:#B87200">${totalInv?fmtC(totalInv):"—"}</div>
+      <div style="font-size:12px;color:#40556A;margin-top:4px">${sipEntries.length} entr${sipEntries.length===1?"y":"ies"} logged</div>
+    </div>
   </div>
 
   <div class="card">
@@ -638,7 +682,7 @@ function renderGrowth(){
       <div>
         <div style="font-size:17px;font-weight:700">📈 Portfolio Growth vs NIFTYBEES</div>
         <div style="font-size:12px;color:#60778A;margin-top:3px">
-          <span style="color:#4FC3F7">━ ━</span> Invested &nbsp;
+          <span style="color:#4FC3F7">━ ━</span> Invested (ETF+MF) &nbsp;
           <span style="color:#4ADE80">━━</span> Portfolio value &nbsp;
           ${S.nifty50History?`<span style="color:#FB923C">- -</span> NIFTYBEES SIP simulation`:""}
         </div>
@@ -712,12 +756,27 @@ async function fetchAMFINavs(){
   S.mfNavLoading=true; S.mfNavError=null;
   if(S.tab==="portfolio") render();
 
-  // Strategy:
-  //   1. If mfSchemeCode is set → fetch directly from mfapi.in (fastest, no search)
-  //   2. If mfSearchQuery is set → search mfapi.in by name, pick Direct+Growth result
-  //   3. Fallback: search by ISIN string (least reliable, kept as last resort)
+  // Strategy per MF entry:
+  //   1. dhanNavSlug  → fetch Dhan MF page via proxy, parse NAV from SSR HTML (most reliable for new/NFO funds)
+  //   2. mfSchemeCode → fetch directly from mfapi.in (no search step, fast)
+  //   3. mfSearchQuery → search mfapi.in by name, strict Direct+Growth match + NAV bounds check
+  //   4. fallback     → search mfapi.in by ISIN
   const results={};
+  const base = S.proxyUrl.replace(/\/+$/,"");
 
+  // ── Fetch NAV from Dhan MF page (proxy scrapes SSR HTML, no CORS issue) ──
+  async function fetchNavFromDhan(slug, p){
+    // Proxy route: GET /dhan-mf-nav?slug=<slug>
+    // Returns JSON: {nav: 10.6158, date: "02 Mar 2026", name: "UTI..."}
+    const r=await fetch(`${base}/dhan-mf-nav?slug=${encodeURIComponent(slug)}`,
+      {signal:AbortSignal.timeout(10000)});
+    if(!r.ok) throw new Error("Proxy /dhan-mf-nav HTTP "+r.status);
+    const d=await r.json();
+    if(!d.nav||isNaN(d.nav)) throw new Error("Invalid NAV in response: "+JSON.stringify(d));
+    results[p.isin]={nav:parseFloat(d.nav), date:d.date||"", schemeName:d.name||p.instrument, source:"dhan"};
+  }
+
+  // ── Fetch from mfapi.in by known scheme code ──────────────────────────────
   async function fetchBySchemeCode(schemeCode, p){
     const r=await fetch(`https://api.mfapi.in/mf/${schemeCode}`,
       {signal:AbortSignal.timeout(8000)});
@@ -726,10 +785,16 @@ async function fetchAMFINavs(){
     const latestNav=parseFloat(d?.data?.[0]?.nav);
     const navDate=d?.data?.[0]?.date||"";
     if(!latestNav||isNaN(latestNav)) throw new Error("Bad NAV in response");
-    results[p.isin]={nav:latestNav, date:navDate,
-      schemeName:d.meta?.scheme_name||p.instrument, schemeCode};
+    // NAV bounds check: if fund defines mfNavBounds=[min,max], reject obviously-wrong values
+    if(p.mfNavBounds){
+      const [lo,hi]=p.mfNavBounds;
+      if(latestNav<lo||latestNav>hi)
+        throw new Error(`NAV ₹${latestNav} outside expected bounds [${lo}-${hi}] — wrong scheme code?`);
+    }
+    results[p.isin]={nav:latestNav, date:navDate, schemeName:d.meta?.scheme_name||p.instrument, schemeCode};
   }
 
+  // ── Search mfapi.in by name, prefer Direct+Growth match ──────────────────
   async function searchAndFetch(query, p){
     const sr=await fetch(
       `https://api.mfapi.in/mf/search?q=${encodeURIComponent(query)}`,
@@ -737,38 +802,54 @@ async function fetchAMFINavs(){
     if(!sr.ok) throw new Error("Search HTTP "+sr.status);
     const schemes=await sr.json();
     if(!schemes||!schemes.length) throw new Error("No results for: "+query);
-    // Prefer scheme whose name contains both "Direct" and "Growth"
+    // Strict: must contain "direct" and "growth"/"gr"
     const match = schemes.find(s=>{
       const n=(s.schemeName||"").toLowerCase();
-      return n.includes("direct")&&(n.includes("growth")||n.includes("gr"));
+      return n.includes("direct")&&(n.includes("growth")||n.includes(" gr"));
     }) || schemes[0];
     await fetchBySchemeCode(match.schemeCode, p);
   }
 
   await Promise.all(MF_PORTFOLIO.map(async p=>{
     try{
-      if(p.mfSchemeCode){
-        // Fastest path: known scheme code
+      if(p.dhanNavSlug && S.proxyActive){
+        // Most reliable for new/NFO funds: parse NAV from Dhan MF page
+        await fetchNavFromDhan(p.dhanNavSlug, p);
+      } else if(p.mfSchemeCode){
         await fetchBySchemeCode(p.mfSchemeCode, p);
       } else if(p.mfSearchQuery){
-        // Search by curated name query
         await searchAndFetch(p.mfSearchQuery, p);
       } else {
-        // Last resort: search by ISIN
         await searchAndFetch(p.isin, p);
       }
     } catch(e){
       console.warn("NAV fetch failed for",p.ticker,":",e.message);
-      S.mfNavError=(S.mfNavError?S.mfNavError+"; ":"")+p.ticker+": "+e.message;
+      // If dhan page fetch failed, fall back to mfapi search
+      if(p.dhanNavSlug && !results[p.isin]){
+        try{
+          console.log("Falling back to mfapi.in search for",p.ticker);
+          await searchAndFetch(p.instrument, p);
+        } catch(e2){
+          console.warn("mfapi fallback also failed for",p.ticker,":",e2.message);
+          S.mfNavError=(S.mfNavError?S.mfNavError+"; ":"")+p.ticker+": "+e.message;
+        }
+      } else {
+        S.mfNavError=(S.mfNavError?S.mfNavError+"; ":"")+p.ticker+": "+e.message;
+      }
     }
   }));
 
   const found=Object.keys(results).length;
   if(found){
     S.mfNavs={...S.mfNavs,...results};
+    // Log matched scheme names so user can verify correct fund was picked
+    Object.entries(results).forEach(([isin,v])=>{
+      const p=MF_PORTFOLIO.find(x=>x.isin===isin);
+      console.log(`✓ NAV [${p?.ticker}] → "${v.schemeName}" NAV=₹${v.nav} date=${v.date} via ${v.source||"mfapi"}`);
+    });
     showToast(`NAV updated: ${Object.entries(results).map(([isin,v])=>{
       const p=MF_PORTFOLIO.find(x=>x.isin===isin);
-      return (p?.ticker||isin.slice(-4))+" ₹"+v.nav.toFixed(2)+" ("+v.date+")";
+      return (p?.ticker||isin.slice(-4))+" ₹"+v.nav.toFixed(2)+(v.date?" ("+v.date+")":"");
     }).join(" · ")} ✓`);
   } else if(!S.mfNavError){
     S.mfNavError="No NAVs fetched — check internet connection";
@@ -1112,6 +1193,12 @@ async function fetchPortfolio(demo=false){
       "SILVERBEES": ["SILVERBEES","NIPSILVETF","SILVER BEES","NIPPON SILVER","SILVERIETF"],
       "NIFTYBEES":  ["NIFTYBEES","NIFTY BEES","NIPNIFTYETF","NIFTIETF"],
     };
+    // ISIN overrides — map ISINs that don't resolve via symbol/securityId
+    const ISIN_OVERRIDES = {
+      // ISINs that are real instruments but not in ETF_PORTFOLIO — suppress warning, log info
+      "INF109KC1NT3": {ticker:"ICICIGOLD",  name:"ICICI Prudential Gold ETF",    note:"Not tracked — add to ETF_PORTFOLIO to include"},
+      "INF174KA1ZE1": {ticker:"NV20",       name:"Kotak Nifty 50 Value 20 ETF",  note:"New ISIN since 27-Feb-2026 (sub-division ₹10→₹1). Not tracked — add to ETF_PORTFOLIO to include"},
+    };
     const ALIAS_MAP={};
     Object.entries(ALIASES).forEach(([ticker,aliases])=>{
       aliases.forEach(a=>{ ALIAS_MAP[a.toUpperCase()]=SYMBOL_MAP[ticker]; });
@@ -1163,7 +1250,16 @@ async function fetchPortfolio(demo=false){
       if(String(t.securityId||"0")==="0" && !tSym && !tIsin) return;
 
       const meta=resolveTradeToMeta(t);
-      if(!meta){ unresolved.add(tSym||tIsin||"?"); return; }
+      if(!meta){
+        // Check if this is a known-but-untracked instrument (ISIN_OVERRIDES)
+        const override = ISIN_OVERRIDES[tIsin];
+        if(override){
+          // Known instrument not in portfolio — skip gracefully with console note
+          console.info(`Trade skipped (not in portfolio): ${tIsin} = ${override.ticker} — ${override.note||""}`);
+          return;
+        }
+        unresolved.add(tSym||tIsin||"?"); return;
+      }
 
       const qty   = parseFloat(t.tradedQuantity||t.fillQty||t.executedQty||t.quantity||0);
       const price = parseFloat(t.tradedPrice||t.fillPrice||t.avgPrice||t.price||0);
@@ -1791,6 +1887,14 @@ function renderPortfolio(){
           <div style="display:flex;justify-content:space-between;font-size:12px">
             <span style="color:#40556A">ETF only</span>
             <span class="mono" style="color:${pnlColor(totalPnLPct())}">${pnl>=0?"+":"−"}${fmtC(Math.abs(pnl))}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span style="color:#40556A">MF only</span>
+            ${(()=>{const mfPnl=mfCurS-mfInvS;const mfPct=mfInvS>0?(mfPnl/mfInvS)*100:0;
+              return mfCurS>0&&mfInvS>0
+                ?`<span class="mono" style="color:${pnlColor(mfPct)}">${mfPnl>=0?"+":"−"}${fmtC(Math.abs(mfPnl))}</span>`
+                :`<span style="color:#40556A;font-size:11px">NAV needed</span>`;
+            })()}
           </div>
         </div>
       </div>

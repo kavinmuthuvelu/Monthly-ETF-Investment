@@ -297,10 +297,12 @@ const S = {
   trackingStartDate: safeLs.get("tracking_start_date"),
   proxyUrl:  (()=>{
     const saved = safeLs.get("proxy_url");
-    // Reject stale values — must be localhost/127.0.0.1 (reject old location.origin values)
-    if(saved && (saved.includes("localhost") || saved.includes("127.0.0.1"))) return saved;
-    if(saved) safeLs.remove("proxy_url");
-    return "http://localhost:8080";
+    if(saved) return saved; // always trust an explicitly saved value
+    // Auto-detect: if running on a real server (not localhost/file), use same origin as proxy
+    const proto = (typeof location!=="undefined"?location.protocol:"http:");
+    const host  = (typeof location!=="undefined"?location.hostname:"localhost");
+    const isLocal = host==="localhost"||host==="127.0.0.1"||host===""||proto==="file:";
+    return isLocal ? "http://localhost:8080" : (proto+"//"+location.host);
   })(),
   dhanEnv:   safeLs.get("dhan_env","production"),
   proxyActive:   false,

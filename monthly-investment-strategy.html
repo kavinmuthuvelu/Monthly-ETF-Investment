@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Monthly Investment Strategy · Dhan</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'DM Sans',sans-serif;background:#07090F;color:#D8E3EF;min-height:100vh}
@@ -516,7 +515,6 @@ function buildGrowthChart(){
                || new Date(Date.now()-86400000*730).toISOString().slice(0,10);
   const axisDates = buildAxisDates(startD);
   const today = axisDates[axisDates.length-1];
-
   const investedData = buildCumulativeInvested(axisDates);
 
   const snapMap={};
@@ -532,88 +530,160 @@ function buildGrowthChart(){
     for(const sd of sortedSnaps){ if(sd<=d) best=snapMap[sd]; else break; }
     return best;
   });
-
   const niftyData = buildNiftybeesSIP(axisDates);
 
-  const labels=axisDates.map(d=>{
-    const dt=new Date(d); return dt.toLocaleDateString("en-IN",{month:"short",year:"2-digit"});
-  });
-
-  const datasets=[{
-    label:"Invested ₹ (ETF+MF)",
-    data:investedData,
-    borderColor:"#4FC3F7",
-    backgroundColor:"rgba(79,195,247,0.07)",
-    borderWidth:2,
-    borderDash:[6,3],
-    stepped:true,
-    fill:true,
-    pointRadius:0,
-    tension:0,
-  }];
-
-  if(portfolioData.some(v=>v!==null)){
-    datasets.push({
-      label:"Portfolio Value ₹",
-      data:portfolioData,
-      borderColor:"#4ADE80",
-      backgroundColor:"rgba(74,222,128,0.06)",
-      borderWidth:2.5,
-      fill:true,
-      pointRadius:0,
-      tension:0.3,
-      spanGaps:true,
-    });
-  }
-
-  if(niftyData&&niftyData.some(v=>v!==null)){
-    datasets.push({
-      label:"NIFTYBEES SIP simulation ₹",
-      data:niftyData,
-      borderColor:"#FB923C",
-      backgroundColor:"transparent",
-      borderWidth:2,
-      borderDash:[4,2],
-      pointRadius:0,
-      tension:0.3,
-      spanGaps:true,
-    });
-  }
-
-  if(!datasets.some(d=>d.data.some(v=>v))){
-    canvas.getContext("2d").clearRect(0,0,canvas.width,canvas.height);
-    return;
-  }
-
+  // ── Pure Canvas 2D chart — no external dependencies ────────────────────────
+  const W=canvas.offsetWidth||canvas.parentElement?.offsetWidth||800;
+  const H=360;
+  canvas.width=W; canvas.height=H;
   const ctx=canvas.getContext("2d");
-  S.chartInstance=new Chart(ctx,{
-    type:"line",
-    data:{labels, datasets},
-    options:{
-      responsive:true,
-      maintainAspectRatio:false,
-      interaction:{mode:"index",intersect:false},
-      plugins:{
-        legend:{labels:{color:"#94A3B8",font:{family:"DM Sans",size:12},padding:20,usePointStyle:true,pointStyleWidth:14}},
-        tooltip:{
-          backgroundColor:"#0E1520",borderColor:"#18263A",borderWidth:1,
-          titleColor:"#D8E3EF",bodyColor:"#94A3B8",padding:12,
-          callbacks:{label:(ctx)=>{
-            const v=ctx.raw;
-            if(v===null||v===undefined) return null;
-            return ` ${ctx.dataset.label.split(" \u20B9")[0]}: \u20B9${Number(v).toLocaleString("en-IN",{maximumFractionDigits:0})}`;
-          }}
-        }
-      },
-      scales:{
-        x:{grid:{color:"rgba(24,38,58,0.5)"},ticks:{color:"#40556A",font:{size:11},maxTicksLimit:14}},
-        y:{grid:{color:"rgba(24,38,58,0.5)"},ticks:{color:"#40556A",font:{size:11},
-          callback:(v)=>"\u20B9"+Number(v).toLocaleString("en-IN",{notation:"compact",maximumFractionDigits:1})}}
-      }
-    }
-  });
-}
+  const PAD={t:30,r:20,b:50,l:72};
+  const cW=W-PAD.l-PAD.r, cH=H-PAD.t-PAD.b;
 
+  // Thin all data to max ~60 points for readability
+  const step=Math.max(1,Math.floor(axisDates.length/60));
+  const idxs=axisDates.map((_,i)=>i).filter(i=>i%step===0||i===axisDates.length-1);
+  const tLabels=idxs.map(i=>{ const d=new Date(axisDates[i]); return d.toLocaleDateString("en-IN",{month:"short",year:"2-digit"}); });
+  const tInv=idxs.map(i=>investedData[i]);
+  const tPort=idxs.map(i=>portfolioData[i]);
+  const tNifty=niftyData?idxs.map(i=>niftyData[i]):null;
+
+  const allVals=[...tInv,...tPort,...(tNifty||[])].filter(v=>v!=null&&v>0);
+  if(!allVals.length){ ctx.clearRect(0,0,W,H); return; }
+  const minV=0, maxV=Math.max(...allVals)*1.08;
+
+  const xOf=i=>PAD.l+(i/(idxs.length-1||1))*cW;
+  const yOf=v=>PAD.t+cH-(((v-minV)/(maxV-minV||1))*cH);
+  const fmtY=v=>v>=1e7?"₹"+(v/1e7).toFixed(1)+"Cr":v>=1e5?"₹"+(v/1e5).toFixed(1)+"L":v>=1e3?"₹"+(v/1e3).toFixed(0)+"K":"₹"+v.toFixed(0);
+
+  // Background
+  ctx.fillStyle="#090E18"; ctx.fillRect(0,0,W,H);
+
+  // Grid lines
+  const yTicks=6;
+  ctx.strokeStyle="rgba(24,38,58,0.8)"; ctx.lineWidth=1;
+  for(let i=0;i<=yTicks;i++){
+    const y=PAD.t+(cH/yTicks)*i;
+    ctx.beginPath(); ctx.moveTo(PAD.l,y); ctx.lineTo(PAD.l+cW,y); ctx.stroke();
+    const val=maxV-(maxV/yTicks)*i;
+    ctx.fillStyle="#40556A"; ctx.font="11px DM Mono,monospace";
+    ctx.textAlign="right"; ctx.fillText(fmtY(val),PAD.l-6,y+4);
+  }
+
+  // X axis labels (every ~7 ticks)
+  ctx.fillStyle="#40556A"; ctx.font="11px DM Sans,sans-serif"; ctx.textAlign="center";
+  const xStep=Math.max(1,Math.floor(idxs.length/10));
+  tLabels.forEach((lbl,i)=>{ if(i%xStep===0||i===tLabels.length-1) ctx.fillText(lbl,xOf(i),H-PAD.b+18); });
+
+  // Helper: draw a line series
+  function drawLine(data, color, dashed=false, fill=false, stepped=false){
+    const pts=data.map((v,i)=>v!=null?{x:xOf(i),y:yOf(v)}:null);
+    if(fill){
+      ctx.beginPath(); let started=false;
+      pts.forEach((p,i)=>{ if(!p) return; if(!started){ctx.moveTo(p.x,yOf(0));ctx.lineTo(p.x,p.y);started=true;}else{if(stepped)ctx.lineTo(p.x,pts[i-1]?.y??p.y);ctx.lineTo(p.x,p.y);} });
+      if(started){ const last=pts.filter(Boolean).at(-1); ctx.lineTo(last.x,yOf(0)); }
+      ctx.closePath();
+      ctx.fillStyle=color.replace(")",",0.07)").replace("rgb","rgba");
+      ctx.fill();
+    }
+    ctx.beginPath(); ctx.strokeStyle=color; ctx.lineWidth=dashed?1.5:2.2;
+    if(dashed) ctx.setLineDash([6,3]); else ctx.setLineDash([]);
+    let first=true;
+    pts.forEach((p,i)=>{
+      if(!p){ first=true; return; }
+      if(first){ ctx.moveTo(p.x,p.y); first=false; }
+      else{ if(stepped&&i>0&&pts[i-1]) ctx.lineTo(p.x,pts[i-1].y); ctx.lineTo(p.x,p.y); }
+    });
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // Draw series
+  drawLine(tInv,"#4FC3F7",true,true,true);
+  if(tPort.some(v=>v!=null)) drawLine(tPort,"#4ADE80",false,true);
+  if(tNifty&&tNifty.some(v=>v!=null)) drawLine(tNifty,"#FB923C",true);
+
+  // Legend
+  const legend=[
+    {color:"#4FC3F7",dash:true,label:"Invested (ETF+MF)"},
+    ...(tPort.some(v=>v!=null)?[{color:"#4ADE80",dash:false,label:"Portfolio Value"}]:[]),
+    ...(tNifty&&tNifty.some(v=>v!=null)?[{color:"#FB923C",dash:true,label:"NIFTYBEES SIP"}]:[]),
+  ];
+  let lx=PAD.l;
+  legend.forEach(({color,dash,label})=>{
+    ctx.strokeStyle=color; ctx.lineWidth=2; ctx.setLineDash(dash?[5,3]:[]);
+    ctx.beginPath(); ctx.moveTo(lx,16); ctx.lineTo(lx+22,16); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle="#94A3B8"; ctx.font="12px DM Sans,sans-serif"; ctx.textAlign="left";
+    ctx.fillText(label,lx+26,20);
+    lx+=ctx.measureText(label).width+52;
+  });
+
+  // Hover tooltip via mousemove
+  canvas._chartData={idxs,tLabels,tInv,tPort,tNifty,PAD,cW,cH,xOf,yOf,fmtY,W,H,maxV,axisDates};
+  canvas.onmousemove=function(e){
+    const rect=canvas.getBoundingClientRect();
+    const mx=e.clientX-rect.left;
+    const d=canvas._chartData;
+    const i=Math.round(((mx-d.PAD.l)/d.cW)*(d.idxs.length-1));
+    if(i<0||i>=d.idxs.length) return;
+    // Redraw
+    buildGrowthChart._lastHover=i;
+    // Vertical line
+    ctx.clearRect(0,0,d.W,d.H);
+    // Rebuild (simple: just re-call render parts, avoid full rebuild loop)
+    buildGrowthChart._drawOnly(ctx,d);
+    const x=d.xOf(i);
+    ctx.strokeStyle="rgba(148,163,184,0.3)"; ctx.lineWidth=1; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(x,d.PAD.t); ctx.lineTo(x,d.PAD.t+d.cH); ctx.stroke();
+    // Tooltip box
+    const rows=[];
+    if(d.tInv[i]!=null) rows.push({color:"#4FC3F7",label:"Invested",val:d.tInv[i]});
+    if(d.tPort[i]!=null) rows.push({color:"#4ADE80",label:"Portfolio",val:d.tPort[i]});
+    if(d.tNifty&&d.tNifty[i]!=null) rows.push({color:"#FB923C",label:"NIFTYBEES",val:d.tNifty[i]});
+    if(!rows.length) return;
+    const bw=170,bh=rows.length*20+32;
+    let bx=x+10; if(bx+bw>d.W-10) bx=x-bw-10;
+    const by=d.PAD.t+4;
+    ctx.fillStyle="#0E1520"; ctx.strokeStyle="#18263A"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle="#D8E3EF"; ctx.font="11px DM Sans,sans-serif"; ctx.textAlign="left";
+    ctx.fillText(d.tLabels[i],bx+10,by+16);
+    rows.forEach(({color,label,val},ri)=>{
+      ctx.fillStyle=color; ctx.fillText(label+":",bx+10,by+34+ri*20);
+      ctx.fillStyle="#D8E3EF"; ctx.textAlign="right";
+      ctx.fillText(d.fmtY(val),bx+bw-10,by+34+ri*20);
+      ctx.textAlign="left";
+    });
+  };
+  canvas.onmouseleave=function(){ buildGrowthChart._drawOnly(ctx,canvas._chartData); };
+
+  // Store a minimal redraw fn
+  buildGrowthChart._drawOnly=function(ctx,d){
+    ctx.fillStyle="#090E18"; ctx.fillRect(0,0,d.W,d.H);
+    ctx.strokeStyle="rgba(24,38,58,0.8)"; ctx.lineWidth=1;
+    for(let i=0;i<=6;i++){
+      const y=d.PAD.t+(d.cH/6)*i;
+      ctx.beginPath(); ctx.moveTo(d.PAD.l,y); ctx.lineTo(d.PAD.l+d.cW,y); ctx.stroke();
+      ctx.fillStyle="#40556A"; ctx.font="11px DM Mono,monospace"; ctx.textAlign="right";
+      ctx.fillText(d.fmtY(d.maxV-(d.maxV/6)*i),d.PAD.l-6,y+4);
+    }
+    const xStep2=Math.max(1,Math.floor(d.idxs.length/10));
+    ctx.fillStyle="#40556A"; ctx.font="11px DM Sans,sans-serif"; ctx.textAlign="center";
+    d.tLabels.forEach((lbl,i)=>{ if(i%xStep2===0||i===d.tLabels.length-1) ctx.fillText(lbl,d.xOf(i),d.H-d.PAD.b+18); });
+    drawLine(d.tInv,"#4FC3F7",true,true,true);
+    if(d.tPort.some(v=>v!=null)) drawLine(d.tPort,"#4ADE80",false,true);
+    if(d.tNifty&&d.tNifty.some(v=>v!=null)) drawLine(d.tNifty,"#FB923C",true);
+    // Legend
+    let lx2=d.PAD.l;
+    legend.forEach(({color,dash,label})=>{
+      ctx.strokeStyle=color; ctx.lineWidth=2; ctx.setLineDash(dash?[5,3]:[]);
+      ctx.beginPath(); ctx.moveTo(lx2,16); ctx.lineTo(lx2+22,16); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle="#94A3B8"; ctx.font="12px DM Sans,sans-serif"; ctx.textAlign="left";
+      ctx.fillText(label,lx2+26,20);
+      lx2+=ctx.measureText(label).width+52;
+    });
+  };
+  S.chartInstance = {destroy:()=>{ canvas.onmousemove=null; canvas.onmouseleave=null; }};
+}
 function renderGrowth(){
   const sipEntries = filteredSIPHistory();
   const totalInv   = sipEntries.reduce((s,e)=>s+e.amount,0);
@@ -2617,7 +2687,11 @@ function render(){
 /* ══════════════════════════════════════════════════
    INIT
 ══════════════════════════════════════════════════ */
-el("app").innerHTML=`
+function initApp(){
+  const appEl = document.getElementById("app");
+  if(!appEl){ console.error("No #app element"); return; }
+
+  appEl.innerHTML=`
   <div class="header">
     <div class="header-top">
       <div class="logo">
@@ -2632,11 +2706,28 @@ el("app").innerHTML=`
     </div>
   </div>
   <div class="content" id="content"></div>
-`;
+  `;
 
-render();
-// Auto-fetch MF NAVs on load — mfapi.in is public, no proxy needed
-setTimeout(()=>fetchAMFINavs(), 900);
+  try{
+    render();
+  } catch(e){
+    console.error("render() failed:", e);
+    document.getElementById("content").innerHTML=
+      `<div style="padding:40px;color:#F87171;font-family:monospace">
+        <div style="font-size:18px;margin-bottom:12px">⚠️ Render error</div>
+        <pre style="font-size:12px;color:#94A3B8;white-space:pre-wrap">${e.message}\n${e.stack}</pre>
+      </div>`;
+  }
+
+  // Auto-fetch MF NAVs — mfapi.in is public, no proxy needed
+  setTimeout(()=>{ try{ fetchAMFINavs(); } catch(e){ console.warn("fetchAMFINavs failed:", e); } }, 900);
+}
+
+if(document.readyState === "loading"){
+  document.addEventListener("DOMContentLoaded", initApp);
+} else {
+  initApp();
+}
 </script>
 </body>
 </html>

@@ -277,22 +277,33 @@ const SYMBOL_MAP = Object.fromEntries(ETF_PORTFOLIO.map(p=>[p.ticker.toUpperCase
 const BASE_SIP = 22000;
 const SNAP_KEY = "portfolio_snapshots";
 
+/* Safe localStorage wrapper — gracefully handles sandboxed iframes (Claude preview,
+   file:// origins, private-browsing restrictions) where localStorage throws SecurityError */
+const safeLs = {
+  get(k, fallback=""){
+    try{ const v=localStorage.getItem(k); return v!==null?v:fallback; }catch{ return fallback; }
+  },
+  set(k,v){ try{ localStorage.setItem(k,v); }catch{} },
+  remove(k){ try{ localStorage.removeItem(k); }catch{} },
+  clear(){ try{ localStorage.clear(); }catch{} },
+};
+
 /* ══════════════════════════════════════════════════
    STATE
 ══════════════════════════════════════════════════ */
 const S = {
-  apiKey:    localStorage.getItem("dhan_api_key")   || "",
-  clientId:  localStorage.getItem("dhan_client_id") || "",
-  startDate: localStorage.getItem("start_date")     || "",
-  trackingStartDate: localStorage.getItem("tracking_start_date") || "",
+  apiKey:    safeLs.get("dhan_api_key"),
+  clientId:  safeLs.get("dhan_client_id"),
+  startDate: safeLs.get("start_date"),
+  trackingStartDate: safeLs.get("tracking_start_date"),
   proxyUrl:  (()=>{
-    const saved = localStorage.getItem("proxy_url") || "";
-    // Reject stale values: must be localhost or 127.0.0.1 — anything else is wrong (e.g. old location.origin)
+    const saved = safeLs.get("proxy_url");
+    // Reject stale values — must be localhost/127.0.0.1 (reject old location.origin values)
     if(saved && (saved.includes("localhost") || saved.includes("127.0.0.1"))) return saved;
-    if(saved) localStorage.removeItem("proxy_url"); // clear the bad value
+    if(saved) safeLs.remove("proxy_url");
     return "http://localhost:8080";
   })(),
-  dhanEnv:   localStorage.getItem("dhan_env")       || "production",
+  dhanEnv:   safeLs.get("dhan_env","production"),
   proxyActive:   false,
   proxyTesting:  false,
   renewingToken: false,
@@ -334,7 +345,7 @@ const S = {
     pollCount:0, pollTimer:null,
   }
 };
-try { S.history = JSON.parse(localStorage.getItem("sip_history")||"[]"); } catch{}
+try { S.history = JSON.parse(safeLs.get("sip_history","[]")); } catch{}
 S.snap30 = get30DayValue(S.snapshots);
 
 /* ── helpers ── */
@@ -358,10 +369,10 @@ function pnlBorder(p){return p>=0.01?"#059669":p<=-0.01?"#DC2626":"#18263A"; }
 
 function computeSIP(loss,floor){ return loss>=0?floor:Math.round(floor+Math.abs(loss)*0.04*floor); }
 function getYearFloor(sd,base){ if(!sd)return base; const y=Math.floor((Date.now()-new Date(sd))/(365.25*24*3600*1000)); return Math.round(base*Math.pow(1.1,y)); }
-function loadSnapshots(){ try{return JSON.parse(localStorage.getItem(SNAP_KEY)||"[]");}catch{return [];} }
+function loadSnapshots(){ return JSON.parse(safeLs.get(SNAP_KEY,"[]")); }
 function loadMFHoldings(){
   try{
-    const raw=JSON.parse(localStorage.getItem("mf_holdings")||"{}");
+    const raw=JSON.parse(safeLs.get("mf_holdings","{}"));
     const out={};
     Object.entries(raw).forEach(([isin,v])=>{
       if(Array.isArray(v)) out[isin]=v;
@@ -372,7 +383,7 @@ function loadMFHoldings(){
     return out;
   }catch{return {};}
 }
-function saveMFHoldings(h){ localStorage.setItem("mf_holdings",JSON.stringify(h)); }
+function saveMFHoldings(h){ safeLs.set("mf_holdings",JSON.stringify(h)); }
 
 /* ══════════════════════════════════════════════════
    GROWTH CHART HELPERS
@@ -706,7 +717,7 @@ function renderGrowth(){
 }
 
 
-function saveSnapshot(v){ const t=new Date().toISOString().slice(0,10); let s=loadSnapshots().filter(x=>x.date!==t); s.unshift({date:t,value:v}); s=s.slice(0,90); localStorage.setItem(SNAP_KEY,JSON.stringify(s)); return s; }
+function saveSnapshot(v){ const t=new Date().toISOString().slice(0,10); let s=loadSnapshots().filter(x=>x.date!==t); s.unshift({date:t,value:v}); s=s.slice(0,90); safeLs.set(SNAP_KEY,JSON.stringify(s)); return s; }
 function get30DayValue(snaps){ if(!snaps.length)return null; const t=new Date(); t.setDate(t.getDate()-30); const ts=t.toISOString().slice(0,10); let best=null,bd=Infinity; snaps.forEach(s=>{const d=Math.abs(new Date(s.date)-new Date(ts))/864e5; if(d<=5&&d<bd){bd=d;best=s;}}); return best; }
 
 /* ══════════════════════════════════════════════════
@@ -1064,7 +1075,7 @@ async function testProxy(){
 
 function setEnv(env){
   S.dhanEnv=env;
-  localStorage.setItem("dhan_env",env);
+  safeLs.set("dhan_env",env);
   render();
   showToast(env==="sandbox"?"🧪 Sandbox selected — use sandbox token":"🏦 Production selected");
 }
@@ -1083,7 +1094,7 @@ async function renewToken(){
   const r=await dhanApi("POST","/v2/RenewToken");
   if(r.ok&&r.data?.accessToken){
     S.apiKey=r.data.accessToken;
-    localStorage.setItem("dhan_api_key",S.apiKey);
+    safeLs.set("dhan_api_key",S.apiKey);
     S.portfolioError=null;
     showToast("Token renewed ✓ — retrying portfolio…");
     await fetchPortfolio(false);
@@ -1619,7 +1630,7 @@ function closeDhanModal(){el("dhan-modal").style.display="none";}
 function logSIP(){
   const e={date:new Date().toLocaleDateString("en-IN"),amount:sipTotal(),loss:S.lossPercent,yearFloor:yearFloor()};
   S.history.unshift(e); S.history=S.history.slice(0,24);
-  localStorage.setItem("sip_history",JSON.stringify(S.history));
+  safeLs.set("sip_history",JSON.stringify(S.history));
   showToast("SIP logged ✓"); render();
 }
 
@@ -1776,8 +1787,8 @@ function renderPortfolio(){
         <div style="display:flex;align-items:center;gap:8px">
           <label style="font-size:11px;color:#40556A;white-space:nowrap">Track from</label>
           <input type="date" value="${S.trackingStartDate}" class="inp" style="padding:5px 10px;font-size:12px;width:140px"
-            onchange="S.trackingStartDate=this.value;localStorage.setItem('tracking_start_date',this.value);if(S.connected)fetchPortfolio(false);else render();">
-          ${S.trackingStartDate?`<button onclick="S.trackingStartDate='';localStorage.removeItem('tracking_start_date');if(S.connected)fetchPortfolio(false);else render();"
+            onchange="S.trackingStartDate=this.value;safeLs.set('tracking_start_date',this.value);if(S.connected)fetchPortfolio(false);else render();">
+          ${S.trackingStartDate?`<button onclick="S.trackingStartDate='';safeLs.remove('tracking_start_date');if(S.connected)fetchPortfolio(false);else render();"
             style="background:transparent;border:none;color:#40556A;cursor:pointer;font-size:16px;padding:0;line-height:1" title="Clear date">✕</button>`:""}
         </div>
         <div class="btn-row" style="margin:0">
@@ -2253,7 +2264,7 @@ function renderCalculator(){
     <div class="card">
       <div class="section-title">Annual Step-Up Tracker</div>
       <div style="margin-bottom:16px"><label class="inp-label">Investment Start Date</label>
-        <input class="inp" type="date" value="${S.startDate}" onchange="S.startDate=this.value;localStorage.setItem('start_date',this.value);render()"></div>
+        <input class="inp" type="date" value="${S.startDate}" onchange="S.startDate=this.value;safeLs.set('start_date',this.value);render()"></div>
       ${[1,2,3,4,5].map(yr=>{
         const floor=Math.round(BASE_SIP*Math.pow(1.1,yr-1));
         const cur=S.startDate?Math.floor((Date.now()-new Date(S.startDate))/(365.25*24*3600*1000))+1:-1;
@@ -2480,12 +2491,12 @@ function renderSettings(){
           <div>
             <label class="inp-label">Client ID</label>
             <input class="inp" type="text" placeholder="Your Dhan Client ID" value="${S.clientId}"
-              oninput="S.clientId=this.value;localStorage.setItem('dhan_client_id',this.value)">
+              oninput="S.clientId=this.value;safeLs.set('dhan_client_id',this.value)">
           </div>
           <div>
             <label class="inp-label">Access Token (JWT)</label>
             <input class="inp" type="password" placeholder="Paste your access token" value="${S.apiKey}"
-              oninput="S.apiKey=this.value;localStorage.setItem('dhan_api_key',this.value)">
+              oninput="S.apiKey=this.value;safeLs.set('dhan_api_key',this.value)">
           </div>
           <div class="btn-row">
             <button class="btn btn-blue" style="flex:1;justify-content:center" onclick="connectDhan()">
@@ -2510,9 +2521,9 @@ function renderSettings(){
             <label class="inp-label">Proxy URL</label>
             <div style="display:flex;gap:8px;align-items:center">
               <input class="inp" type="text" placeholder="http://localhost:8080" value="${S.proxyUrl}"
-                oninput="S.proxyUrl=this.value;localStorage.setItem('proxy_url',this.value)" style="flex:1">
+                oninput="S.proxyUrl=this.value;safeLs.set('proxy_url',this.value)" style="flex:1">
               <button class="btn btn-ghost btn-sm" style="white-space:nowrap;flex-shrink:0" title="Reset to default localhost:8080"
-                onclick="S.proxyUrl='http://localhost:8080';localStorage.setItem('proxy_url','http://localhost:8080');render();showToast('Proxy URL reset to localhost:8080')">↺ Reset</button>
+                onclick="S.proxyUrl='http://localhost:8080';safeLs.set('proxy_url','http://localhost:8080');render();showToast('Proxy URL reset to localhost:8080')">↺ Reset</button>
             </div>
           </div>
           <div class="btn-row">
@@ -2560,7 +2571,7 @@ function renderSettings(){
                 </div>`;}).join("")}
               </div>`}
           </div>
-          <button class="btn btn-red btn-sm" style="margin-top:12px" onclick="if(confirm('Clear all data?')){localStorage.clear();location.reload();}">🗑️ Clear All Data</button>
+          <button class="btn btn-red btn-sm" style="margin-top:12px" onclick="if(confirm('Clear all data?')){safeLs.clear();location.reload();}">🗑️ Clear All Data</button>
         </div>
       </div>
     </div>

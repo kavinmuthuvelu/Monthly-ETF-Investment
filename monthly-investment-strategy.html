@@ -285,7 +285,7 @@ const S = {
   clientId:  localStorage.getItem("dhan_client_id") || "",
   startDate: localStorage.getItem("start_date")     || "",
   trackingStartDate: localStorage.getItem("tracking_start_date") || "",
-  proxyUrl:  localStorage.getItem("proxy_url")      || (location.protocol==="file:"?"http://localhost:8080":location.origin),
+  proxyUrl:  localStorage.getItem("proxy_url")      || "http://localhost:8080",
   dhanEnv:   localStorage.getItem("dhan_env")       || "production",
   proxyActive:   false,
   proxyTesting:  false,
